@@ -48,3 +48,6 @@ bash setup_venv.sh
 # or on Windows:
 .venv\Scripts\python pyamoto.py
 ```
+
+### Disclaimer
+AI tools are used in the development of this program.
