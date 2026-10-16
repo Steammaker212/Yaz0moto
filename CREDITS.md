@@ -10,6 +10,11 @@
 * mrbengtsson - Sprite Images & Coding
 * Luminyx1 - Coding
 
+### Miyamoto! DX (New Super Mario Bros. U Deluxe support)
+* AboodXD - BNTX/BFRES, swizzle and BCn code, Deluxe level and tileset format reverse-engineering
+* Gota7 - Miyamoto! DX
+* mrbengtsson - Miyamoto! DX
+
 ### Level and Tileset Data Reverse-engineering
 * AboodXD
 * Kinnay

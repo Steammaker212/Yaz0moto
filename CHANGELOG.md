@@ -23,6 +23,7 @@
 - Open Level By Name: select levels from game or mod paths, add functionality for editing the associated world and names of levels in mods, add a shortcut for copying game levels to a mod project, add searchbar for filtering levels
 - Added new setting types: dualbox, strybble
 - Added an option to show a notes box in the actor properties window
+- Added support for New Super Mario Bros. U Deluxe (Switch): pick it as a base game under Game Setup. Levels are read and written as little-endian `.sarc` files and tilesets are loaded from the `Unit` folder next to `Course`. Opening a level from the other version offers to switch games. The tileset editor does not support Deluxe yet
 - Added the ability to make spritedata options conditional on another value
 - Patches may now provide their own `data` folder which can be referenced to bundle custom assets in a level archive
 - Added a new "Dark Red" default theme
