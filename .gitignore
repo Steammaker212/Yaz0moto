@@ -28,3 +28,12 @@ pyamoto.sh
 /tools/*/*.tmp
 /tools/*/*.gtx
 *.dmg
+# Build artifacts
+*.pyd
+build/
+*.obj
+*.lib
+*.exp
+__pycache__/
+*.pyxbldc
+
