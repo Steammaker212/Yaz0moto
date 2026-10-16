@@ -80,6 +80,21 @@ class Level_NSMBU(AbstractLevel):
         self.areas.append(area.Area_NSMBU())
         globals.Area = self.areas[0]
 
+    @staticmethod
+    def _sarcEndianness():
+        """
+        Byte order of the level archive: Switch (Deluxe) levels are little-endian
+        """
+        return '<' if globals.IsNSMBUDX else '>'
+
+    @staticmethod
+    def _usesOuterSarc(innerfilename):
+        """
+        Whether to wrap the level in an outer SARC with a "levelname" file.
+        That is a Wii U-era convention; Deluxe levels are always a flat archive.
+        """
+        return bool(globals.UseOuterSarcFormat and innerfilename and not globals.IsNSMBUDX)
+
     def new(self):
         """
         Creates a completely new level
@@ -251,7 +266,7 @@ class Level_NSMBU(AbstractLevel):
         spritemap_strings, sprite_type_remap = self._buildSpritemapSaveProjection()
 
         # Make a new archive
-        newArchive = SarcLib.SARC_Archive()
+        newArchive = SarcLib.SARC_Archive(endianness=self._sarcEndianness())
 
         # Create a folder within the archive
         courseFolder = SarcLib.Folder('course')
@@ -283,11 +298,11 @@ class Level_NSMBU(AbstractLevel):
             newArchive.addFile(SarcLib.File('course/spritemap.bin', spritemap_data))
 
         # Outer SARC format (Miyamoto-style wrapping)
-        if globals.UseOuterSarcFormat and innerfilename:
+        if self._usesOuterSarc(innerfilename):
             innersarc = newArchive.save()[0]
             globals.szsData[innerfilename] = innersarc
 
-            outerArchive = SarcLib.SARC_Archive()
+            outerArchive = SarcLib.SARC_Archive(endianness=self._sarcEndianness())
             outerArchive.addFile(SarcLib.File(innerfilename, innersarc))
             outerArchive.addFile(SarcLib.File('levelname', innerfilename.encode('utf-8')))
             globals.szsData['levelname'] = innerfilename.encode('utf-8')
@@ -296,8 +311,11 @@ class Level_NSMBU(AbstractLevel):
 
             return outerArchive.save()[0]
 
-        # Default flat format: add sprites/tilesets to the same archive
-        self._add_files_to_archive(newArchive)
+        # Default flat format: add sprites/tilesets to the same archive.
+        # Deluxe levels only contain course data: the game loads sprite resources
+        # and tilesets from its own Model/Unit folders.
+        if not globals.IsNSMBUDX:
+            self._add_files_to_archive(newArchive)
 
         return newArchive.save()[0]
 
@@ -311,7 +329,7 @@ class Level_NSMBU(AbstractLevel):
         )
 
         # Make a new archive (inner SARC)
-        newArchive = SarcLib.SARC_Archive()
+        newArchive = SarcLib.SARC_Archive(endianness=self._sarcEndianness())
 
         # Create a folder within the archive
         courseFolder = SarcLib.Folder('course')
@@ -349,11 +367,11 @@ class Level_NSMBU(AbstractLevel):
             newArchive.addFile(SarcLib.File('course/spritemap.bin', spritemap_data))
 
         # Outer SARC format (Miyamoto-style wrapping)
-        if globals.UseOuterSarcFormat and innerfilename:
+        if self._usesOuterSarc(innerfilename):
             innersarc = newArchive.save()[0]
             globals.szsData[innerfilename] = innersarc
 
-            outerArchive = SarcLib.SARC_Archive()
+            outerArchive = SarcLib.SARC_Archive(endianness=self._sarcEndianness())
             outerArchive.addFile(SarcLib.File(innerfilename, innersarc))
             outerArchive.addFile(SarcLib.File('levelname', innerfilename.encode('utf-8')))
             globals.szsData['levelname'] = innerfilename.encode('utf-8')
@@ -365,9 +383,10 @@ class Level_NSMBU(AbstractLevel):
 
             return outerArchive.save()[0]
 
-        # Default flat format
-        for szsThingName in globals.szsData:
-            newArchive.addFile(SarcLib.File(szsThingName, globals.szsData[szsThingName]))
+        # Default flat format (Deluxe levels carry no embedded resources)
+        if not globals.IsNSMBUDX:
+            for szsThingName in globals.szsData:
+                newArchive.addFile(SarcLib.File(szsThingName, globals.szsData[szsThingName]))
 
         return newArchive.save()[0]
 

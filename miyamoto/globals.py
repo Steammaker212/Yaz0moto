@@ -170,7 +170,8 @@ cython_available = False
 err_msg = ''
 names_bg = []
 # Game enums
-FileExtentions = ('.szs', '.sarc')
+FileExtensions_NSMBU = ('.szs', '.sarc')
 FileExtensions_NSMBUDX = ('.sarc',)
+FileExtentions = FileExtensions_NSMBU  # switched by loading.ApplyGamePlatform()
 Pa0Tilesets = ('Pa0_jyotyu', 'Pa0_jyotyu_chika',
                'Pa0_jyotyu_yougan', 'Pa0_jyotyu_yougan2')

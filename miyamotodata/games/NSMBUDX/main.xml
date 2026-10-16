@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<game name="New Super Mario Bros. U Deluxe" version="1.0" platform="nsmbudx"
+      description="New Super Mario Bros. U Deluxe for Nintendo Switch.[br]Levels are little-endian SARC files in the [b]Course[/b] folder; tilesets are loaded from the [b]Unit[/b] folder next to it."
+      base="New Super Mario Bros. U">
+
+    <!-- Everything not listed here (sprites, backgrounds, tileset names, music, entrances...)
+         is shared with the Wii U version and inherited from it. -->
+
+    <!-- Deluxe stores course data little-endian, so it needs its own blank course -->
+    <file name="blankcourse"      path="blankcourse.bin"  patch="false" />
+
+    <!-- Deluxe does not include the Wii U-only levels -->
+    <file name="levelnames"       path="levelnames.xml"   patch="false" />
+
+    <!-- Template for the BFRES that wraps a tileset's BNTX textures when saving -->
+    <file name="tilesettemplate"  path="output.bfres"     patch="false" />
+
+</game>

@@ -21,12 +21,13 @@ from xml.etree import ElementTree as etree
 
 from . import globals
 from . import spritelib as SLib
+from . import yaz0
 from .gamedefs import MiyamotoGameDefinition
 from .misc import SpriteDefinition, BGName, setting, setSetting
 import SarcLib
 
 from .tileset import TilesetTile, ObjectDef
-from .tileset import loadGTX, ProcessOverrides
+from .tileset import loadGTX, loadBNTXFromBFRES, loadTexFromBNTX, ProcessOverrides
 from .tileset import CascadeTilesetNames_Category
 from .tileset import SortTilesetNames_Category
 
@@ -453,11 +454,11 @@ def LoadEntranceNames(reload_=False):
         idx += 1
 
 
-def _LoadTileset(idx, name):
+def _OpenTilesetWiiU(name):
     """
-    Load in a tileset into a specific slot
+    Wii U: the tileset archive was embedded in the level (or loaded from miyamotoextras).
+    Returns (sarc, img, nml, colldata, loadAnimation, indexFormat), None if missing, or False on error.
     """
-
     # if this file's not found, return
     if name not in globals.szsData:
         print(f'[DEBUG _LoadTileset] FAIL: name={name!r} not found in szsData')
@@ -485,6 +486,81 @@ def _LoadTileset(idx, name):
     img = loadGTX(comptiledata)
     nml = loadGTX(nmldata)
 
+    def loadAnimation(texname, useAddrLib=False):
+        try:
+            return loadGTX(sarc['BG_tex/%s.gtx' % texname].data, useAddrLib)
+
+        except Exception:
+            return None
+
+    return sarc, img, nml, colldata, loadAnimation, '>HBBH'
+
+
+def _OpenTilesetDX(name):
+    """
+    Deluxe: tilesets are standalone Yaz0-compressed archives in the game's Unit folder,
+    holding a BFRES with the tile textures as BNTX.
+    Returns (sarc, img, nml, colldata, loadAnimation, indexFormat), or False on error.
+    """
+    path = globals.gamedef.FindTilesetFile(name)
+    if path is None:
+        QtWidgets.QMessageBox.warning(
+            None, 'Missing tileset',
+            'Cannot find the tileset "[file]" in the Unit folder next to your Deluxe Course folder, so it will not be loaded.\n\nCheck the game path under Preferences > Game Setup.'.replace('[file]', str(name)))
+        return False
+
+    try:
+        with open(path, 'rb') as fileobj:
+            sarcdata = fileobj.read()
+
+        if sarcdata[:4] == b'Yaz0':
+            sarcdata = yaz0.decompressFASTYZ(sarcdata)
+
+        if not sarcdata or sarcdata[:4] != b'SARC':
+            raise ValueError('not a SARC archive')
+
+        sarc = SarcLib.SARC_Archive()
+        sarc.load(sarcdata)
+
+        bfresdata = sarc['output.bfres'].data
+        colldata = sarc['BG_chk/d_bgchk_%s.bin' % name].data
+
+        # load in the textures
+        bntx = loadBNTXFromBFRES(bfresdata)
+        img = loadTexFromBNTX(bntx, name)
+        nml = loadTexFromBNTX(bntx, name + '_nml')
+
+    except Exception as e:
+        QtWidgets.QMessageBox.warning(
+            None, 'Corrupted tileset',
+            'The tileset file [file] could not be read, so it will not be loaded.\n\n[err]'.replace('[file]', str(name)).replace('[err]', str(e)))
+        return False
+
+    def loadAnimation(texname, useAddrLib=False):
+        try:
+            return loadTexFromBNTX(bntx, texname)
+
+        except Exception:
+            return None
+
+    return sarc, img, nml, colldata, loadAnimation, '<HBBH'
+
+
+def _LoadTileset(idx, name):
+    """
+    Load in a tileset into a specific slot
+    """
+
+    if globals.IsNSMBUDX:
+        source = _OpenTilesetDX(name)
+    else:
+        source = _OpenTilesetWiiU(name)
+
+    if not source:
+        return source
+
+    sarc, img, nml, colldata, loadAnimation, indexFormat = source
+
     # Divide it into individual tiles and
     # add collisions at the same time
     def getTileFromImage(tilemap, xtilenum, ytilenum):
@@ -511,29 +587,10 @@ def _LoadTileset(idx, name):
         tuka_coin_anime = None
         belt_conveyor_anime = None
 
-        try:
-            hatena_anime = loadGTX(sarc['BG_tex/hatena_anime.gtx'].data)
-
-        except:
-            pass
-
-        try:
-            block_anime = loadGTX(sarc['BG_tex/block_anime.gtx'].data)
-
-        except:
-            pass
-
-        try:
-            tuka_coin_anime = loadGTX(sarc['BG_tex/tuka_coin_anime.gtx'].data)
-
-        except:
-            pass
-
-        try:
-            belt_conveyor_anime = loadGTX(sarc['BG_tex/belt_conveyor_anime.gtx'].data, True)
-
-        except:
-            pass
+        hatena_anime = loadAnimation('hatena_anime')
+        block_anime = loadAnimation('block_anime')
+        tuka_coin_anime = loadAnimation('tuka_coin_anime')
+        belt_conveyor_anime = loadAnimation('belt_conveyor_anime', True)
 
         for i in range(256):
             if globals.Tiles[i].coreType == 7:
@@ -584,7 +641,7 @@ def _LoadTileset(idx, name):
     indexfile = sarc['BG_unt/%s_hd.bin' % name].data
     deffile = sarc['BG_unt/%s.bin' % name].data
     objcount = len(indexfile) // 6
-    indexstruct = struct.Struct('>HBBH')
+    indexstruct = struct.Struct(indexFormat)
 
     for i in range(objcount):
         data = indexstruct.unpack_from(indexfile, i * 6)
@@ -655,6 +712,16 @@ def LoadLevelNamesForDef(gamedef):
         return []
 
 
+def ApplyGamePlatform(gamedef):
+    """
+    Switches the editor between the Wii U (big-endian, .szs/.sarc) and Switch
+    "Deluxe" (little-endian, .sarc) level formats, based on the game definition.
+    """
+    isDX = bool(getattr(gamedef, 'isDX', False))
+    globals.IsNSMBUDX = isDX
+    globals.FileExtentions = globals.FileExtensions_NSMBUDX if isDX else globals.FileExtensions_NSMBU
+
+
 def LoadGameDef(base_game=None, mods=None, dlg=None):
     """
     Loads a game + mods chain.
@@ -677,6 +744,7 @@ def LoadGameDef(base_game=None, mods=None, dlg=None):
             current_def = new_def
 
         globals.gamedef = current_def
+        ApplyGamePlatform(current_def)
 
         # Load BG names
         LoadBGNames()

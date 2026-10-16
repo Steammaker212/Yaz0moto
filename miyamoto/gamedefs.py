@@ -73,6 +73,7 @@ class MiyamotoGameDefinition:
     def InitAsEmpty(self):
         gdf = self.GameDefinitionFile
         self.custom = False
+        self.isDX = False      # True for New Super Mario Bros. U Deluxe (Switch) and anything built on it
         self.source = 'base'   # 'base' | 'game' | 'mod'
         self.base = None
         self.gamepath = None   # folder name within source directory
@@ -139,6 +140,15 @@ class MiyamotoGameDefinition:
         else:
             self.base = MiyamotoGameDefinition()
 
+        # Which console version of the game this definition describes. An explicit
+        # platform="nsmbudx" selects Deluxe; otherwise inherit from the base
+        # (so mods built on top of Deluxe are Deluxe too).
+        platform = root.attrib.get('platform', '').strip().lower()
+        if platform:
+            self.isDX = platform == 'nsmbudx'
+        else:
+            self.isDX = bool(getattr(self.base, 'isDX', False))
+
         addpath = os.path.join(_root, name) + os.sep
         for node in root:
             n = node.tag.lower()
@@ -177,7 +187,8 @@ class MiyamotoGameDefinition:
             return str(setting('GamePath_NSMBU', setting('GamePath', '')))
         if self.source == 'game':
             key = 'GamePath_' + self.gamepath
-            return str(setting(key, setting('GamePath', '')))
+            # The legacy single "GamePath" setting only ever held the Wii U game
+            return str(setting(key, setting('GamePath', '') if self.gamepath == 'NSMBU' else ''))
         else:
             key = 'GamePath_mod_' + self.gamepath
             return str(setting(key, ''))
@@ -200,13 +211,48 @@ class MiyamotoGameDefinition:
             return [str(setting('GamePath_NSMBU', setting('GamePath', '')))]
         if self.source == 'game':
             key = 'GamePath_' + self.gamepath
-            path = str(setting(key, setting('GamePath', '')))
+            path = str(setting(key, setting('GamePath', '') if self.gamepath == 'NSMBU' else ''))
         else:
             key = 'GamePath_mod_' + self.gamepath
             path = str(setting(key, ''))
         paths = self.base.GetGamePaths() if self.base else []
+
+        # A game that only borrows *data* (sprites, tilesets lists, ...) from a base on
+        # a different platform must not search that base's game files: Wii U levels and
+        # Switch levels are not interchangeable.
+        if self.base is not None and self.isDX != getattr(self.base, 'isDX', False):
+            paths = []
+
         paths.append(path)
         return paths
+
+    def GetUnitPaths(self):
+        """
+        Deluxe only: the existing "Unit" folders (where tilesets live) that sit next to
+        each game/mod "Course" folder, most specific (mods) first.
+        """
+        units = []
+        for path in reversed(self.GetGamePaths()):
+            if not path:
+                continue
+
+            unit = os.path.join(os.path.dirname(os.path.normpath(path)), 'Unit')
+            if os.path.isdir(unit) and unit not in units:
+                units.append(unit)
+
+        return units
+
+    def FindTilesetFile(self, name):
+        """
+        Deluxe only: path of the tileset archive "<name>.szs" in the most specific
+        Unit folder that has it, or None.
+        """
+        for unit in self.GetUnitPaths():
+            candidate = os.path.join(unit, name + '.szs')
+            if os.path.isfile(candidate):
+                return candidate
+
+        return None
 
     def GetLastLevel(self):
         """
@@ -444,6 +490,14 @@ def FindGameDef(name, skip=None):
                 return def_
 
     return None
+
+
+def IsBaseGameDX(folder):
+    """True if the base game in miyamotodata/games/<folder> is the Switch (Deluxe) version."""
+    try:
+        return bool(MiyamotoGameDefinition(folder, source='game').isDX)
+    except Exception:
+        return False
 
 
 def getAvailableBaseGames():

@@ -17,6 +17,7 @@ import json
 import os
 import platform
 import subprocess
+import os
 import struct
 import tempfile
 import zlib
@@ -28,10 +29,12 @@ from . import globals
 
 import addrlib
 import bc3
+from bntxlib import bntx as BNTX
 from . import dds
 from . import gtx
 import SarcLib
 from . import spritelib as SLib
+from . import yaz0
 
 if globals.cython_available:
     import gtx_quick_cy
@@ -1362,6 +1365,12 @@ def PackTexture(idx, nml=False):
 
     painter.end()
 
+    if globals.IsNSMBUDX:
+        # Deluxe stores the tileset as uncompressed RGBA8 inside a BNTX
+        data = tex.bits()
+        data.setsize(tex.byteCount())
+        return bytes(data)
+
     outData = writeGTX(tex, idx, nml)
 
     return outData
@@ -1392,7 +1401,7 @@ def SaveTileset(idx):
         if obj is None:
             break
 
-        indexfile += struct.pack('>HBBH', len(deffile), obj.width, obj.height, obj.randByte)
+        indexfile += struct.pack('<HBBH' if globals.IsNSMBUDX else '>HBBH', len(deffile), obj.width, obj.height, obj.randByte)
 
         for row in obj.rows:
             for tile in row:
@@ -1426,6 +1435,9 @@ def SaveTileset(idx):
         name = 'Pa%d_%08X%08X' % (idx, buffers_hash, len(buffers_data))
         exec("globals.Area.tileset%d = name" % idx)
 
+    if globals.IsNSMBUDX:
+        return _SaveTilesetDX(name, tiledata, nmldata, colldata, deffile, indexfile)
+
     arc = SarcLib.SARC_Archive()
 
     tex = SarcLib.Folder('BG_tex')
@@ -1443,6 +1455,49 @@ def SaveTileset(idx):
     unt.addFile(SarcLib.File('%s_hd.bin' % name, indexfile))
 
     return arc.save()[0]
+
+
+def _SaveTilesetDX(name, tiledata, nmldata, colldata, deffile, indexfile):
+    """
+    Deluxe: tilesets are not embedded in the level. Write a Yaz0-compressed SARC
+    (BFRES with BNTX textures + collision + object data) into the game's Unit folder.
+    """
+    assert name
+
+    template = globals.gamedef.file('tilesettemplate')
+    if not template or not os.path.isfile(template):
+        raise ValueError('The Deluxe tileset template (output.bfres) is missing from the Pyamoto data files.')
+
+    unitPaths = globals.gamedef.GetUnitPaths()
+    if not unitPaths:
+        raise ValueError(
+            'Could not save the tileset: no "Unit" folder was found next to your Deluxe "Course" folder.\n\n'
+            'Check the game path under Preferences > Game Setup.')
+
+    arc = SarcLib.SARC_Archive(endianness='<')
+
+    bntx = writeBNTX([(name, tiledata, 2048, 512), ('%s_nml' % name, nmldata, 2048, 512)])
+
+    with open(template, 'rb') as file:
+        bfresdata = file.read()
+
+    arc.addFile(SarcLib.File('output.bfres', bytes(writeBFRES(bfresdata, bntx))))
+
+    chk = SarcLib.Folder('BG_chk')
+    arc.addFolder(chk)
+    chk.addFile(SarcLib.File('d_bgchk_%s.bin' % name, colldata))
+
+    unt = SarcLib.Folder('BG_unt')
+    arc.addFolder(unt)
+    unt.addFile(SarcLib.File('%s.bin' % name, deffile))
+    unt.addFile(SarcLib.File('%s_hd.bin' % name, indexfile))
+
+    path = os.path.join(unitPaths[0], name + '.szs')
+    if not yaz0.compressFASTYZ(arc.save()[0], path):
+        raise ValueError('Could not save the tileset to:\n%s' % path)
+
+    # Everything is on disk already; there is nothing to embed in the level
+    return None
 
 
 def _loadGTX_gtx_quick(width, height, format_, data):
@@ -1492,6 +1547,250 @@ def loadGTX(gtxdata, useAddrLib=False):
         udata = _loadGTX_addrlib(width, height, format_, use, tileMode, swizzle_, data)
 
     return QtGui.QImage(udata, width, height, QtGui.QImage.Format_RGBA8888)
+
+
+def writeBNTX(images):
+    """
+    Generates a BNTX file (as bytes) from a list of (name, rgba8 data, width, height)
+    """
+    bntx = BNTX.File()
+    bntx.new('textures')
+
+    # The BNTX library imports textures from DDS files on disk; use the
+    # OS temp folder rather than the application's own directory.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for name, data, width, height in images:
+            hdr = BNTX.dds.generateHeader(1, width, height, "rgba8", [2, 3, 4, 5], 0, False)
+
+            ddspath = os.path.join(tmpdir, '%s.dds' % name)
+            with open(ddspath, 'wb') as out:
+                out.write(hdr)
+                out.write(data)
+
+            bntx.addTexture(0, False, False, False, False, ddspath)
+
+    return bntx.save()
+
+
+def writeBFRES(bfresdata, bntx):
+    bom = ">" if bfresdata[0xC:0xE] == b'\xFE\xFF' else "<"
+
+    alignmentShift = bfresdata[0xE]
+    relocTbloff = struct.unpack(bom + "I", bfresdata[0x18:0x1C])[0]
+    relocTbl = bytearray(bfresdata[relocTbloff:])
+
+    assert struct.unpack(bom + "I", bfresdata[relocTbloff + 8:relocTbloff + 12])[0] == 5
+
+    bfresdata = bytearray(bfresdata[:relocTbloff])
+
+    startoff = struct.unpack(bom + "q", bfresdata[0x98:0xA0])[0]
+    count = struct.unpack(bom + "q", bfresdata[0xC8:0xD0])[0]
+
+    assert count > 0
+    i = count - 1
+
+    fileoff = struct.unpack(bom + "q", bfresdata[startoff + i * 16:startoff + 8 + i * 16])[0]
+    dataSize = struct.unpack(bom + "q", bfresdata[startoff + 8 + i * 16:startoff + 16 + i * 16])[0]
+
+    assert bfresdata[fileoff:fileoff + 4] == b'BNTX' and relocTbloff - fileoff - dataSize < 1 << alignmentShift
+
+    round_up = lambda x, y: ((x - 1) | (y - 1)) + 1
+
+    bfresdata[startoff + 8 + i * 16:startoff + 16 + i * 16] = struct.pack(bom + "q", len(bntx))
+    bfresdata[fileoff:] = bntx
+
+    relocAlignBytes = b'\0' * (round_up(len(bfresdata), 1 << alignmentShift) - len(bfresdata))
+    bfresdata += relocAlignBytes
+
+    bRelocTbloff = struct.pack(bom + "I", len(bfresdata))
+    relocTbl[4:8] = bRelocTbloff
+
+    sec5Size = struct.unpack(bom + "I", relocTbl[0x7C:0x80])[0]
+    sec5Size += len(bfresdata) - relocTbloff
+    relocTbl[0x7C:0x80] = struct.pack(bom + "I", sec5Size)
+
+    bfresdata += relocTbl
+
+    bfresdata[0x18:0x1C] = bRelocTbloff
+    bfresdata[0x1C:0x20] = struct.pack(bom + "I", len(bfresdata))
+
+    return bfresdata
+
+
+def loadBNTXFromBFRES(inb):
+    assert inb[:8] == b'FRES    '
+    bom = ">" if inb[0xC:0xE] == b'\xFE\xFF' else "<"
+    startoff = struct.unpack(bom + "q", inb[0x98:0xA0])[0]
+    count = struct.unpack(bom + "q", inb[0xC8:0xD0])[0]
+
+    if not count:
+        raise RuntimeError("Tileset not found")
+
+    else:
+        # Not sure if this is correct, I hope it is.
+        # If you face any problems, try replacing "0x20" with "0x10 * count".
+        namesoff = struct.unpack(bom + "q", inb[0xA0:0xA8])[0] + 0x20
+
+        for i in range(count):
+            fileoff = struct.unpack(bom + "q", inb[startoff + i * 16:startoff + 8 + i * 16])[0]
+            dataSize = struct.unpack(bom + "q", inb[startoff + 8 + i * 16:startoff + 16 + i * 16])[0]
+
+            data = inb[fileoff:fileoff + dataSize]
+            nameoff = struct.unpack(bom + "q", inb[namesoff + i * 16:namesoff + 8 + i * 16])[0]
+            nameSize = struct.unpack(bom + 'H', inb[nameoff:nameoff + 2])[0]
+            name = inb[nameoff + 2:nameoff + 2 + nameSize].decode('utf-8')
+
+            if name == "textures.bntx":
+                bntx = BNTX.File(); bntx.load(data, 0)
+                break
+
+        else:
+            raise RuntimeError("Tileset not found")
+
+    return bntx
+
+
+def loadTexFromBNTX(bntx, name):
+    for texture in bntx.textures:
+        if name == texture.name:
+            break
+
+    else:
+        raise RuntimeError("Tileset not found")
+
+    if texture.format_ in [0x101, 0x201, 0x301, 0x401, 0x501, 0x601, 0x701,
+                           0x801, 0x901, 0xb01, 0xb06, 0xc01, 0xc06, 0xe01,
+                           0x1a01, 0x1a06, 0x1b01, 0x1b06, 0x1c01, 0x1c06,
+                           0x1d01, 0x1d02, 0x1e01, 0x1e02, 0x3b01] and texture.dim == 2:
+
+        result, _, _ = bntx.rawData(texture)
+
+        if texture.format_ == 0x101:
+            data = result[0]
+
+            format_ = 'la4'
+            bpp = 1
+
+        elif texture.format_ == 0x201:
+            data = result[0]
+
+            format_ = 'l8'
+            bpp = 1
+
+        elif texture.format_ == 0x301:
+            data = result[0]
+
+            format_ = 'rgba4'
+            bpp = 2
+
+        elif texture.format_ == 0x401:
+            data = result[0]
+
+            format_ = 'abgr4'
+            bpp = 2
+
+        elif texture.format_ == 0x501:
+            data = result[0]
+
+            format_ = 'rgb5a1'
+            bpp = 2
+
+        elif texture.format_ == 0x601:
+            data = result[0]
+
+            format_ = 'a1bgr5'
+            bpp = 2
+
+        elif texture.format_ == 0x701:
+            data = result[0]
+
+            format_ = 'rgb565'
+            bpp = 2
+
+        elif texture.format_ == 0x801:
+            data = result[0]
+
+            format_ = 'bgr565'
+            bpp = 2
+
+        elif texture.format_ == 0x901:
+            data = result[0]
+
+            format_ = 'la8'
+            bpp = 2
+
+        elif (texture.format_ >> 8) == 0xb:
+            data = result[0]
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0xc:
+            data = result[0]
+
+            format_ = 'bgra8'
+            bpp = 4
+
+        elif texture.format_ == 0xe01:
+            data = result[0]
+
+            format_ = 'bgr10a2'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0x1a:
+            data = BNTX.bcn.decompressDXT1(result[0], texture.width, texture.height)
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0x1b:
+            data = BNTX.bcn.decompressDXT3(result[0], texture.width, texture.height)
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0x1c:
+            data = BNTX.bcn.decompressDXT5(result[0], texture.width, texture.height)
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0x1d:
+            data = BNTX.bcn.decompressBC4(result[0], texture.width, texture.height, 0 if texture.format_ & 3 == 1 else 1)
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif (texture.format_ >> 8) == 0x1e:
+            data = BNTX.bcn.decompressBC5(result[0], texture.width, texture.height, 0 if texture.format_ & 3 == 1 else 1)
+
+            format_ = 'rgba8'
+            bpp = 4
+
+        elif texture.format_ == 0x3b01:
+            data = result[0]
+
+            format_ = 'bgr5a1'
+            bpp = 2
+
+        data = BNTX.dds.formConv.torgba8(texture.width, texture.height, bytearray(data), format_, bpp, texture.compSel)
+        return QtGui.QImage(bytes(data), texture.width, texture.height, QtGui.QImage.Format_RGBA8888).copy()
+
+    raise RuntimeError("%s could not be loaded" % name)
+
+
+def HasTileset(name):
+    """
+    Whether a tileset can currently be loaded by this name: embedded in the level
+    (Wii U), or present in the game's Unit folder (Deluxe).
+    """
+    if not name:
+        return False
+
+    if globals.IsNSMBUDX:
+        return globals.gamedef.FindTilesetFile(name) is not None
+
+    return name in globals.szsData
 
 
 def CascadeTilesetNames_Category(lower, upper):

@@ -94,14 +94,25 @@ def FilesAreMissing():
     return False
 
 
-def isValidGamePath(check='ug'):
+def isValidGamePath(check='ug', game=None):
     """
-    Checks to see if the path for NSMBU contains a valid game
+    Checks to see if the path contains a valid game's levels.
+    game: folder name of the base game the path is for (e.g. 'NSMBUDX'); when None,
+    the currently loaded game decides how strictly to check.
     """
     if check == 'ug': check = globals.gamedef.GetGamePath()
 
     if check is None or check == '': return False
     if not os.path.isdir(check): return False
+
+    isDX = (game == 'NSMBUDX') if game is not None else bool(globals.IsNSMBUDX)
+
+    if isDX:
+        # Deluxe: little-endian .sarc levels in "Course", with the tilesets in a
+        # "Unit" folder right next to it.
+        return (os.path.isfile(os.path.join(check, '1-1.sarc')) and
+                os.path.isdir(os.path.join(os.path.dirname(os.path.normpath(check)), 'Unit')))
+
     if not (
         os.path.isfile(os.path.join(check, '1-1.szs')) or os.path.isfile(os.path.join(check, '1-1.sarc'))): return False
 
