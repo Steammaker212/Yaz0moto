@@ -152,6 +152,64 @@ if loaded:
     A = lvl2.areas[0]
     check('tileset slot 1 name survived the round trip', A.tileset1 == newname)
 
+
+# ---------- zone background tab: the "ushort format requires 0 <= number <= 0xffff" crash
+from miyamoto.dialogs import BGTab, ChooseLevelNameDialog
+from miyamoto.bytes import to_bytes
+import struct as _struct
+
+def bg_tuple(parallax, name='Mori'):
+    return (0, 0, 0, 0, to_bytes(name, 16), parallax)
+
+tab = BGTab(bg_tuple(7))                       # a stored value the 5-entry dropdown has no name for
+check('out-of-range parallax is shown, not blank', tab.parallaxMode.currentIndex() >= 0 and 'Unknown (7)' in tab.parallaxMode.currentText())
+check('out-of-range parallax round-trips unchanged', tab.parallaxValue() == 7)
+check('in-range parallax still maps to its index', BGTab(bg_tuple(3)).parallaxValue() == 3)
+tab.parallaxMode.setCurrentIndex(1)
+check('user can pick a named mode afterwards', tab.parallaxValue() == 1)
+check('parallax value is never negative', all(BGTab(bg_tuple(v)).parallaxValue() >= 0 for v in (0, 4, 5, 9, 65535)))
+
+import types
+def pack_zone(parallax):
+    area = globals.Area
+    saved = area.zones
+    area.zones = [types.SimpleNamespace(id=0, background=(0, 0, 0, 0, to_bytes('Mori', 16), parallax))]
+    try:
+        return area.GetOptimizedBGs(_struct.Struct('<Hhhh16sHxx'))
+    finally:
+        area.zones = saved
+
+try:
+    packed = pack_zone(BGTab(bg_tuple(7)).parallaxValue()); ok = packed[1] == 1 and packed[0][0][5] == 7
+except Exception:
+    import traceback; traceback.print_exc(); ok = False
+check('GetOptimizedBGs packs a zone with an unnamed parallax mode (the crash)', ok)
+try:
+    pack_zone(-1); crashed = False
+except _struct.error:
+    crashed = True
+check('a negative parallax value really is what crashed before', crashed)
+
+# ---------- Deluxe background file names
+check('Deluxe background file name', BGTab.fileNameFor('Mori') == 'dv_Mori.Nin_NX_NVN.szs')
+check('Deluxe background folder', BGTab.fileFolder() == 'romfs/Model')
+_keep = BGTab(bg_tuple(0))
+check('tab label uses the Deluxe name', _keep._filenameLabel.text() == 'dv_Mori.Nin_NX_NVN.szs')
+check('tab custom-name suffix uses the Deluxe name', _keep._szsLabel.text() == '.Nin_NX_NVN.szs')
+globals.IsNSMBUDX = False
+check('Wii U background file name unchanged', BGTab.fileNameFor('Mori') == 'dv_Mori.szs' and BGTab.fileFolder() == 'content/Common/distant_view')
+globals.IsNSMBUDX = True
+
+# ---------- level picker lists level files that have no name
+lv = os.path.join(tmp, 'lv'); os.makedirs(lv)
+for n in ('1-1', '1-2', '40-1', '40-10', '40-2'):
+    open(os.path.join(lv, n + '.sarc'), 'wb').write(b'x')
+named = [['World 1', [['Level 1', '1-1'], ['Level 2', '1-2']]]]
+out = ChooseLevelNameDialog._supplementUnlisted(named, lv)
+extra = [c for cat in out if cat[0] == 'Uncategorized' for c in cat[1]]
+check('unlisted levels are added, listed ones are not', [c[1] for c in extra] == ['40-1', '40-2', '40-10'])
+check('the shared name list is not modified', named == [['World 1', [['Level 1', '1-1'], ['Level 2', '1-2']]]])
+
 shutil.rmtree(tmp, ignore_errors=True)
 print('\n%d/%d passed' % (sum(ok for _, ok in results), len(results)))
 sys.exit(0 if all(ok for _, ok in results) else 1)

@@ -1363,7 +1363,7 @@ class BGTab(QtWidgets.QWidget):
         self.bgFname.setPlaceholderText('background name')
 
         self._dvLabel  = QtWidgets.QLabel('dv_')
-        self._szsLabel = QtWidgets.QLabel('.szs')
+        self._szsLabel = QtWidgets.QLabel(self.fileSuffix())
         filenameRow = QtWidgets.QHBoxLayout()
         filenameRow.setContentsMargins(0, 0, 0, 0)
         filenameRow.setSpacing(2)
@@ -1415,16 +1415,23 @@ class BGTab(QtWidgets.QWidget):
         self.zPos.setToolTip("Z offset applied to the background center. No longer valid in the original game.")
         self.zPos.setValue(background[3])
 
+        # The stored value is a 16-bit number, but only 0-4 have a name. Levels (Deluxe
+        # ones in particular) can hold other values; keep those instead of leaving the box
+        # blank, because a blank box reads back as -1 and can't be saved.
+        self._storedParallax = background[5]
         self.parallaxMode = QtWidgets.QComboBox()
-        self.parallaxMode.addItems((
+        for value, text in enumerate((
             "Y Offset Off, All Parallax On",
             "Y Offset On, All Parallax On",
             "Y Offset On, All Parallax Off",
             "Y Offset On, Y Parallax Off",
             "Y Offset On, X Parallax Off",
-        ))
+        )):
+            self.parallaxMode.addItem(text, value)
+        if not 0 <= self._storedParallax <= 4:
+            self.parallaxMode.addItem('Unknown (%d)' % self._storedParallax, self._storedParallax)
         self.parallaxMode.setToolTip("Parallax Mode from NSMB2. No longer valid in the original game.")
-        self.parallaxMode.setCurrentIndex(background[5])
+        self.parallaxMode.setCurrentIndex(self.parallaxMode.findData(self._storedParallax))
 
         self.preview = QtWidgets.QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
@@ -1462,6 +1469,11 @@ class BGTab(QtWidgets.QWidget):
         if not custom:
             self.bgFname.setText(BGName.getNameForTrans(self.bgName.currentText()))
         self.updatePreview()
+
+    def parallaxValue(self):
+        """The parallax mode to store (never negative, whatever the box shows)."""
+        value = self.parallaxMode.currentData()
+        return self._storedParallax if value is None else int(value)
 
     def connectChanges(self, cb):
         self.bgName.activated.connect(cb)
@@ -1508,7 +1520,22 @@ class BGTab(QtWidgets.QWidget):
         self.preview.setPixmap(pix)
 
         name = self.bgFname.text()
-        self._filenameLabel.setText(f'dv_{name}.szs' if name else '')
+        self._filenameLabel.setText(self.fileNameFor(name) if name else '')
+        self._filenameLabel.setToolTip(
+            ('Located in: ' + self.fileFolder()) if name else '')
+
+    # The background model is looked up by name, but the file name and folder differ per game
+    @staticmethod
+    def fileSuffix():
+        return '.Nin_NX_NVN.szs' if globals.IsNSMBUDX else '.szs'
+
+    @staticmethod
+    def fileFolder():
+        return 'romfs/Model' if globals.IsNSMBUDX else 'content/Common/distant_view'
+
+    @classmethod
+    def fileNameFor(cls, name):
+        return 'dv_%s%s' % (name, cls.fileSuffix())
 
 
 class ScreenCapChoiceDialog(QtWidgets.QDialog):
@@ -3986,6 +4013,8 @@ class ChooseLevelNameDialog(QtWidgets.QDialog):
             names = LoadLevelNamesForDef(def_)
             if not names:
                 names = self._scanGamePathForLevels(game_path)
+            else:
+                names = self._supplementUnlisted(names, game_path)
             if names:
                 entries.append((folder, def_.name, names, game_path, None, True))
 
@@ -4135,6 +4164,46 @@ class ChooseLevelNameDialog(QtWidgets.QDialog):
         return visible
 
     # ── Unnamed level discovery ────────────────────────────────────────────
+    @staticmethod
+    def _supplementUnlisted(names, game_path):
+        """Return names plus an 'Uncategorized' entry for every level file in game_path that
+        no category lists (e.g. Deluxe ships 100+ levels that the name list doesn't cover)."""
+        import copy
+        names = copy.deepcopy(names)
+        if not game_path or not os.path.isdir(game_path):
+            return names
+
+        covered = set()
+        def _collect(items):
+            for it in items:
+                if isinstance(it[1], str):
+                    covered.add(it[1])
+                else:
+                    _collect(it[1])
+        _collect(names)
+
+        import re
+        def _natural(f):
+            return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', f)]
+
+        extra = []
+        for fname in sorted(os.listdir(game_path), key=_natural):
+            for ext in ('.szs', '.sarc'):
+                if fname.lower().endswith(ext):
+                    code = fname[:-len(ext)]
+                    if code not in covered:
+                        extra.append([code, code])
+                    break
+
+        if extra:
+            uncat = next((n for n in names if n[0] == 'Uncategorized'), None)
+            if uncat is not None:
+                uncat[1] = uncat[1] + extra
+            else:
+                names.append(['Uncategorized', extra])
+
+        return names
+
     @staticmethod
     def _scanGamePathForLevels(game_path):
         """Scan a game path directory for .szs/.sarc files, returns synthetic names list."""

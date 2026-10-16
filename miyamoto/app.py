@@ -4137,7 +4137,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 # Check if there is a file by this name
                 if not os.path.isfile(name):
                     QtWidgets.QMessageBox.warning(None, 'Error',
-                                                  'Cannot find the required level file [file].szs. Check your "course_res_pack" folder and make sure it exists.'.replace('[file]', str(name)))
+                                                  ('Cannot find the required level file [file].sarc. Check your "Course" folder and make sure it exists.' if globals.IsNSMBUDX
+                                                  else 'Cannot find the required level file [file].szs. Check your "course_res_pack" folder and make sure it exists.').replace('[file]', str(name)))
                     return False
 
                 # Set the filepath variables
@@ -6039,7 +6040,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     if tab.Zone_settings[i].isChecked(): z.type |= 1 << i
                 
                 name = bgTab.bgFname.text()
-                z.background = (z.id, bgTab.xPos.value(), bgTab.yPos.value(), bgTab.zPos.value(), to_bytes(name, 16), bgTab.parallaxMode.currentIndex())
+                z.background = (z.id, bgTab.xPos.value(), bgTab.yPos.value(), bgTab.zPos.value(), to_bytes(name, 16), bgTab.parallaxValue())
                 if not ygn2Used: ygn2Used = (name == "Yougan_2")
                 
                 new_zones.append(z)

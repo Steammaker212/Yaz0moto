@@ -24,6 +24,8 @@
 - Added new setting types: dualbox, strybble
 - Added an option to show a notes box in the actor properties window
 - Added support for New Super Mario Bros. U Deluxe (Switch): pick it as a base game under Game Setup. Levels are read and written as little-endian `.sarc` files and tilesets are loaded from the `Unit` folder next to `Course`. Opening a level from the other version offers to switch games. The tileset editor does not support Deluxe yet
+- Fixed a crash when saving a level whose zone background has a parallax mode the dropdown doesn't list: the value is now kept and shown as "Unknown (n)"
+- In Deluxe mode the Background tab shows the Deluxe file name (`dv_<name>.Nin_NX_NVN.szs`, in `romfs/Model`), and the Choose Level window also lists level files that have no name (Deluxe ships over 100 of them)
 - Added the ability to make spritedata options conditional on another value
 - Patches may now provide their own `data` folder which can be referenced to bundle custom assets in a level archive
 - Added a new "Dark Red" default theme
