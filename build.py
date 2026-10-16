@@ -116,6 +116,27 @@ bc3_decompress_ext = Extension(
     extra_link_args=extra_args
 )
 
+bntx_swizzle_ext = Extension(
+    name="bntxlib.swizzle_cy",
+    sources=["bntxlib/swizzle_cy.pyx"],
+    extra_compile_args=extra_args,
+    extra_link_args=extra_args
+)
+
+bntx_formconv_ext = Extension(
+    name="bntxlib.formConv_cy",
+    sources=["bntxlib/formConv_cy.pyx"],
+    extra_compile_args=extra_args,
+    extra_link_args=extra_args
+)
+
+bntx_bcn_decompress_ext = Extension(
+    name="bntxlib.bcn.decompress_cy",
+    sources=["bntxlib/bcn/decompress_cy.pyx"],
+    extra_compile_args=extra_args,
+    extra_link_args=extra_args
+)
+
 # Platform-specific include_files
 include_files = [
     'miyamotodata',
@@ -140,8 +161,8 @@ setup(
     options={
         'build_exe': {
             'excludes': excludes,
-            'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'miyamoto', 'requests', 'certifi'],
-            'includes': ['fastyz', 'addrlib', 'bc3', 'ssl'],
+            'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'bntxlib', 'bntxlib.bcn', 'miyamoto', 'requests', 'certifi'],
+            'includes': ['fastyz', 'addrlib', 'bc3', 'bntxlib', 'ssl'],
             'build_exe': dir_,
             'optimize': 2,
             'silent': True,
@@ -153,7 +174,8 @@ setup(
         }
         },
     cmdclass = cmdclass_dict,
-    ext_modules = cythonize([fastyz_ext, addrlib_ext, bc3_compress_ext, bc3_decompress_ext], language_level=3),
+    ext_modules = cythonize([fastyz_ext, addrlib_ext, bc3_compress_ext, bc3_decompress_ext,
+                            bntx_swizzle_ext, bntx_formconv_ext, bntx_bcn_decompress_ext], language_level=3),
     executables = [
         Executable(
             'pyamoto.py',
