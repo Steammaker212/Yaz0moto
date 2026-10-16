@@ -1944,6 +1944,10 @@ class PreferencesDialog(QtWidgets.QDialog):
                     'When enabled, the level is saved in Miyamoto\'s outer-SARC format '
                     'with a "levelname" file.')
                 self.useOuterSarcFormat.setChecked(globals.UseOuterSarcFormat)
+                if globals.IsNSMBUDX:
+                    # Deluxe levels are always flat archives
+                    self.useOuterSarcFormat.setEnabled(False)
+                    self.useOuterSarcFormat.setToolTip('Not used by New Super Mario Bros. U Deluxe.')
 
                 if not globals.IsNSMBUDX:
                     self.modifyInnerName = QtWidgets.QCheckBox('Modify Internal Name')
@@ -2248,7 +2252,9 @@ class PreferencesDialog(QtWidgets.QDialog):
 
                     path_row = QtWidgets.QHBoxLayout()
                     path_edit = QtWidgets.QLineEdit()
-                    path_edit.setPlaceholderText('Select the game folder…')
+                    path_edit.setPlaceholderText(
+                        'Select the Course folder (with the Unit folder next to it)…' if def_.isDX
+                        else 'Select the game folder…')
                     existing = setting('GamePath_' + folder,
                                        setting('GamePath', '') if folder == 'NSMBU' else '')
                     if existing:
@@ -2258,11 +2264,13 @@ class PreferencesDialog(QtWidgets.QDialog):
                     valid_lbl = QtWidgets.QLabel()
                     valid_lbl.setStyleSheet('font-size: 11px;')
 
-                    def _make_validator(edit, lbl):
+                    def _make_validator(edit, lbl, folder=folder, isDX=def_.isDX):
                         def _v():
                             p = edit.text().strip()
-                            ok = isValidGamePath(p) if p else False
-                            lbl.setText('✓ Valid' if ok else ('✗ Not set' if not p else '✗ Invalid path'))
+                            ok = isValidGamePath(p, folder) if p else False
+                            badMsg = ('✗ Needs 1-1.sarc here and a Unit folder next to it' if isDX
+                                      else '✗ Invalid path')
+                            lbl.setText('✓ Valid' if ok else ('✗ Not set' if not p else badMsg))
                             lbl.setStyleSheet('color: green; font-size: 11px;' if ok
                                               else 'color: palette(mid); font-size: 11px;' if not p
                                               else 'color: red; font-size: 11px;')
@@ -3313,8 +3321,15 @@ class PreferencesDialog(QtWidgets.QDialog):
                 active_list.customContextMenuRequested.connect(_on_context_menu_active)
 
             def getSelectedBaseGame(self_inner):
+                # Keep the current game if its path is still valid; otherwise fall back to
+                # the first game that has a valid path
+                current = setting('LastBaseGame', 'NSMBU')
+                current_edit = self_inner._path_edits.get(current)
+                if current_edit is not None and isValidGamePath(current_edit.text().strip(), current):
+                    return current
+
                 for folder, edit in self_inner._path_edits.items():
-                    if isValidGamePath(edit.text().strip()):
+                    if isValidGamePath(edit.text().strip(), folder):
                         return folder
                 return setting('LastBaseGame', 'NSMBU')
 

@@ -500,7 +500,9 @@ class _GamePathPage(QtWidgets.QWidget):
 
             path_row = QtWidgets.QHBoxLayout()
             path_edit = QtWidgets.QLineEdit()
-            path_edit.setPlaceholderText("Select the course_res_pack folder…")
+            path_edit.setPlaceholderText(
+                "Select the Course folder (with the Unit folder next to it)…" if def_.isDX
+                else "Select the course_res_pack folder…")
             existing = setting('GamePath_' + folder, setting('GamePath', '') if folder == 'NSMBU' else '')
             if existing:
                 path_edit.setText(str(existing))
@@ -509,11 +511,13 @@ class _GamePathPage(QtWidgets.QWidget):
             valid_lbl = QtWidgets.QLabel()
             valid_lbl.setStyleSheet('font-size: 11px;')
 
-            def _make_validator(edit, lbl):
+            def _make_validator(edit, lbl, folder=folder, isDX=def_.isDX):
                 def _v():
                     p = edit.text().strip()
-                    ok = isValidGamePath(p) if p else False
-                    lbl.setText('✓ Valid game path' if ok else ('✗ No valid game files found in this folder' if p else ''))
+                    ok = isValidGamePath(p, folder) if p else False
+                    badMsg = ('✗ Needs 1-1.sarc in this folder and a Unit folder next to it' if isDX
+                              else '✗ No valid game files found in this folder')
+                    lbl.setText('✓ Valid game path' if ok else (badMsg if p else ''))
                     lbl.setStyleSheet('color: #27ae60; font-size: 11px;' if ok
                                       else 'color: #c0392b; font-size: 11px;' if p
                                       else 'font-size: 11px;')
@@ -547,7 +551,7 @@ class _GamePathPage(QtWidgets.QWidget):
         layout.addStretch(1)
 
     def isPathValid(self):
-        return any(isValidGamePath(e.text().strip()) for e in self._path_edits.values())
+        return any(isValidGamePath(e.text().strip(), folder) for folder, e in self._path_edits.items())
 
 
 # ---------------------------------------------------------------------------
@@ -838,9 +842,11 @@ class InteractiveSetupDialog(QtWidgets.QDialog):
             setSetting('GamePath_' + folder, path)
             if folder == 'NSMBU':
                 setSetting('GamePath', path)  # backward compat
-            if path and isValidGamePath(path) and first_valid_folder is None:
+            if path and isValidGamePath(path, folder) and first_valid_folder is None:
                 first_valid_folder = folder
-                if globals.gamedef is not None:
+                # (the per-game path was saved just above; only mirror it onto the
+                # loaded game definition if that is the same game)
+                if globals.gamedef is not None and getattr(globals.gamedef, 'gamepath', None) == folder:
                     SetGamePath(path)
 
         setSetting('LastBaseGame', first_valid_folder or next(iter(self._gamePathPage._path_edits), 'NSMBU'))

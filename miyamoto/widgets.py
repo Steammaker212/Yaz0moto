@@ -42,7 +42,7 @@ from .clips import Clip, load_clips, save_clips
 from .tileset import TilesetTile, ObjectDef, objFitsInTileset
 from .tileset import addObjToTilesetImpl, addObjToTileset, exportObject
 from .tileset import HandleTilesetEdited, DeleteObject, RenderObject
-from .tileset import RenderObjectAll, ProcessOverrides, SimpleTilesetNames
+from .tileset import RenderObjectAll, ProcessOverrides, SimpleTilesetNames, HasTileset
 
 from .ui import createHorzLine, createVertLine, GetIcon
 from .verifications import SetDirty
@@ -4703,7 +4703,7 @@ class TilesetsTab(QtWidgets.QWidget):
         self.tile0.addItem('None', '')  # None
         # - Retail Tilesets
         for tfile, tname in data:
-            if tfile in globals.szsData:
+            if HasTileset(tfile):
                 text = '[name] ([file])'.replace('[name]', str(tname)).replace('[file]', str(tfile))  # [name] ([file])
                 self.tile0.addItem(text, tfile)
                 if name == tfile:

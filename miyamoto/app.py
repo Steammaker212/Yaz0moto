@@ -169,6 +169,22 @@ class PropEditorStack(QtWidgets.QStackedWidget):
         return w.minimumSizeHint() if w else super().minimumSizeHint()
 
 
+def levelFileFilters(forSave=False):
+    """
+    File dialog filters for level archives. Deluxe levels are always uncompressed
+    little-endian .sarc files; the Wii U game also uses Yaz0-compressed .szs.
+    """
+    if globals.IsNSMBUDX:
+        filters = 'Level Archives (*.sarc)'
+        return filters if forSave else filters + ';;All Files (*)'
+
+    if forSave:
+        return 'Compressed Level Archives (*.szs);;Uncompressed Level Archives (*.sarc)'
+
+    return ('Level Archives (*.szs *.sarc);;Compressed Level Archives (*.szs);;'
+            'Uncompressed Level Archives (*.sarc);;All Files (*)')
+
+
 class MiyamotoWindow(QtWidgets.QMainWindow):
     """
     Miyamoto main level editor window
@@ -324,11 +340,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 if dlg.action is None:
                     sys.exit(0)
                 elif dlg.action == WelcomeDialog.ACTION_OPEN_FILE:
-                    filetypes = ''
-                    filetypes += 'Level Archives' + ' (*.szs *.sarc);;'
-                    filetypes += 'Compressed Level Archives' + ' (*.szs);;'
-                    filetypes += 'Uncompressed Level Archives' + ' (*.sarc);;'
-                    filetypes += 'All Files' + ' (*)'
+                    filetypes = levelFileFilters()
                     fn = QtWidgets.QFileDialog.getOpenFileName(self, 'Choose a level archive', '', filetypes)[0]
                     if fn:
                         loaded = self.LoadLevel(None, fn, True, 1, True)
@@ -1537,8 +1549,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Sets the window title accordingly
         """
-        self.setWindowTitle('%s%s' % (
-        self.fileTitle, (' ' + '[unsaved]') if globals.Dirty else ''))
+        self.setWindowTitle('%s%s%s' % (
+        self.fileTitle, (' ' + '[unsaved]') if globals.Dirty else '',
+        ' [Deluxe]' if globals.IsNSMBUDX else ''))
 
     def CheckDirty(self):
         """
@@ -2838,11 +2851,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             if reply != QtWidgets.QMessageBox.Yes or not self.HandleSave():
                 return
 
-        filetypes = ''
-        filetypes += 'Level Archives' + ' (*.szs *.sarc);;'
-        filetypes += 'Compressed Level Archives' + ' (*.szs);;'
-        filetypes += 'Uncompressed Level Archives' + ' (*.sarc);;'
-        filetypes += 'All Files' + ' (*)'
+        filetypes = levelFileFilters()
         fn = QtWidgets.QFileDialog.getOpenFileName(self, 'Choose a level archive', '', filetypes)[0]
         if fn == '': return
         fn = str(fn)
@@ -2924,6 +2933,14 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
                 return False
 
+        # Wii U and Deluxe areas aren't interchangeable (different byte order)
+        if (getattr(arc_, 'endianness', '>') == '<') != bool(globals.IsNSMBUDX):
+            QtWidgets.QMessageBox.warning(
+                self, 'Cannot Import Area',
+                'That level is from the %s version of the game, but the %s version is selected.' % (
+                    ('Deluxe', 'Wii U') if not globals.IsNSMBUDX else ('Wii U', 'Deluxe')))
+            return False
+
         # get the area count
         areacount = 0
 
@@ -2989,9 +3006,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             return False
 
         # import the tilesets with the area
-        getblock = struct.Struct('>II')
+        getblock = struct.Struct('<II' if globals.IsNSMBUDX else '>II')
         data = getblock.unpack_from(course, 0)
-        if data[1]:
+        if data[1] and not globals.IsNSMBUDX:  # Deluxe tilesets aren't embedded: they stay in Unit
             block = course[data[0]:data[0] + data[1]]
             tilesetNames = list(map(bytes_to_string, struct.unpack_from('32s32s32s32s', block)))
             for name in tilesetNames:
@@ -3030,12 +3047,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # no error checking. if it saved last time, it will probably work now
 
         name = None
-        if globals.UseOuterSarcFormat:
+        if self._usesOuterSarc():
             name = self.getInnerSarcName()
             if name == '':
                 return
 
-        if self.fileSavePath.endswith('.szs'):
+        if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
             yaz0.compressFASTYZ(
                 globals.Level.saveNewArea(None, None, None, None, name),
                 self.fileSavePath,
@@ -3096,7 +3113,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         globals.UseOuterSarcFormat = dlg.generalTab.useOuterSarcFormat.isChecked()
         setSetting('UseOuterSarcFormat', globals.UseOuterSarcFormat)
 
-        if not globals.IsNSMBUDX:
+        # (the checkbox doesn't exist when the dialog was opened under Deluxe)
+        if hasattr(dlg.generalTab, 'modifyInnerName'):
             globals.ModifyInnerName = dlg.generalTab.modifyInnerName.isChecked()
             setSetting('ModifyInnerName', globals.ModifyInnerName)
 
@@ -3181,7 +3199,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             old_mods = [old_mods]
         if new_base != old_base or new_mods != old_mods:
             from . import loading as _loading
-            _loading.LoadGameDef(new_base, new_mods, dlg=True)
+            from .gamedefs import IsBaseGameDX
+            platformChanges = IsBaseGameDX(new_base) != globals.IsNSMBUDX
+
+            # Wii U and Deluxe levels use different byte orders and tileset storage, so
+            # the open level can't be carried over: confirm, then start a new level.
+            if platformChanges and self.CheckDirty():
+                pass  # cancelled: stay on the current game
+
+            else:
+                _loading.LoadGameDef(new_base, new_mods, dlg=True)
+                if platformChanges:
+                    self.updateOpenByNameState()
+                    self.LoadLevel(None, None, False, 1, True)
+
             del _loading
 
         # Get the tileset settings
@@ -3262,11 +3293,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         if self.CheckDirty(): return
 
-        filetypes = ''
-        filetypes += 'Level Archives' + ' (*.szs *.sarc);;'
-        filetypes += 'Compressed Level Archives' + ' (*.szs);;'
-        filetypes += 'Uncompressed Level Archives' + ' (*.sarc);;'
-        filetypes += 'All Files' + ' (*)'
+        filetypes = levelFileFilters()
         
         last_dir = str(setting('LastFilePath')) if globals.settings.contains('LastFilePath') else ''
         fn = QtWidgets.QFileDialog.getOpenFileName(self, 'Choose a level archive', last_dir, filetypes)[0]
@@ -3351,7 +3378,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             return self.HandleSaveAs()
 
         name = None
-        if globals.UseOuterSarcFormat:
+        if self._usesOuterSarc():
             name = self.getInnerSarcName()
             if name == '':
                 return False
@@ -3362,12 +3389,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
             return False
 
-        if len(data) > 73295462:
+        if len(data) > 73295462 and not globals.IsNSMBUDX:
             QtWidgets.QMessageBox.warning(None, 'Warning',
                                           "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
 
         try:
-            if self.fileSavePath.endswith('.szs'):
+            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
                 yaz0.compressFASTYZ(data, self.fileSavePath)
 
             else:
@@ -3396,7 +3423,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             return self.HandleSaveAs()
 
         name = None
-        if globals.UseOuterSarcFormat:
+        if self._usesOuterSarc():
             name = self.getInnerSarcName()
             if name == '':
                 return False
@@ -3407,12 +3434,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
             return False
 
-        if len(data) > 73295462:
+        if len(data) > 73295462 and not globals.IsNSMBUDX:
             QtWidgets.QMessageBox.warning(None, 'Warning',
                                           "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
 
         try:
-            if self.fileSavePath.endswith('.szs'):
+            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
                 yaz0.compressFASTYZ(data, self.fileSavePath)
 
             else:
@@ -3437,21 +3464,21 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Save a level back to the archive, with a new filename
         """
-        filetypes = ''
-        filetypes += 'Compressed Level Archives' + ' (*.szs);;'
-        filetypes += 'Uncompressed Level Archives' + ' (*.sarc)'
+        filetypes = levelFileFilters(forSave=True)
         
         last_dir = str(setting('LastFilePath')) if globals.settings.contains('LastFilePath') else ''
         fn = QtWidgets.QFileDialog.getSaveFileName(self, 'Choose a level archive', last_dir, filetypes)[0]
         if fn == '': return False
         fn = str(fn)
+        if globals.IsNSMBUDX and not fn.lower().endswith('.sarc'):
+            fn = (os.path.splitext(fn)[0] if fn.lower().endswith('.szs') else fn) + '.sarc'
         setSetting('LastFilePath', os.path.dirname(fn))
 
         self.fileSavePath = fn
         self.fileTitle = os.path.basename(fn)
 
         name = None
-        if globals.UseOuterSarcFormat:
+        if self._usesOuterSarc():
             name = self.getInnerSarcName()
             if name == '':
                 return False
@@ -3466,12 +3493,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
             return False
 
-        if len(data) > 73295462:
+        if len(data) > 73295462 and not globals.IsNSMBUDX:
             QtWidgets.QMessageBox.warning(None, 'Warning',
                                           "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
 
         try:
-            if self.fileSavePath.endswith('.szs'):
+            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
                 yaz0.compressFASTYZ(data, self.fileSavePath)
 
             else:
@@ -3497,6 +3524,42 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         Exit the editor. Why would you want to do this anyway?
         """
         self.close()
+
+    def _levelMatchesGame(self, levelData):
+        """
+        Wii U levels are big-endian SARCs and Deluxe levels are little-endian. Opening one
+        with the other game selected would misread (and then corrupt) it, so offer to
+        switch games instead. Returns False if the level should not be loaded.
+        """
+        if not levelData or len(levelData) < 8 or levelData[:4] != b'SARC':
+            return True
+
+        isDeluxeLevel = levelData[6:8] == b'\xff\xfe'
+        if isDeluxeLevel == bool(globals.IsNSMBUDX):
+            return True
+
+        wanted, current, target = (
+            ('Deluxe', 'Wii U', 'NSMBUDX') if isDeluxeLevel else ('Wii U', 'Deluxe', 'NSMBU'))
+
+        reply = QtWidgets.QMessageBox.question(
+            self, 'Pyamoto',
+            'This looks like a New Super Mario Bros. U %s level, but the %s version is selected.\n\n'
+            'Switch to the %s version? (Active mods will be turned off.)' % (wanted, current, wanted),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return False
+
+        # (Unsaved changes were already confirmed by whoever asked to open this level.)
+        from . import loading as _loading
+        _loading.LoadGameDef(target, [], dlg=True)
+        self.updateOpenByNameState()
+        return True
+
+    @staticmethod
+    def _usesOuterSarc():
+        """The outer-SARC level wrapper is Wii U-only; Deluxe levels are flat archives."""
+        return bool(globals.UseOuterSarcFormat and not globals.IsNSMBUDX)
 
     def getInnerSarcName(self):
         name = os.path.splitext(self.fileTitle)[0]
@@ -4097,6 +4160,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 else:
                     return False  # keep it from crashing by loading things it shouldn't
 
+                if not self._levelMatchesGame(levelData):
+                    return False
+
                 arc = SarcLib.SARC_Archive()
                 arc.load(levelData)
 
@@ -4457,9 +4523,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             self.scene.addItem(com)
             com.UpdateListItem()
 
-        for tileset_name in globals.Pa0Tilesets:
-            if tileset_name not in globals.szsData:
-                self.LoadDefaultTileset(tileset_name, True)
+        # Deluxe loads its tilesets from the game's Unit folder; there are no
+        # bundled Wii U defaults to fall back to.
+        if not globals.IsNSMBUDX:
+            for tileset_name in globals.Pa0Tilesets:
+                if tileset_name not in globals.szsData:
+                    self.LoadDefaultTileset(tileset_name, True)
 
     def ReloadTilesets(self, soft=False):
         tilesets = [globals.Area.tileset0, globals.Area.tileset1, globals.Area.tileset2, globals.Area.tileset3]
@@ -5869,7 +5938,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     fname = fname[len('[CUSTOM] [name]'.replace('[name]', str(''))):]
 
                 if fname not in ('', None):
-                    if fname not in globals.szsData:
+                    if not HasTileset(fname):
                         toUnload = True
                     else:
                         globals.Area.tileset0 = fname
@@ -6078,10 +6147,28 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         if saveClip:
             globals.app.clipboard().setImage(screenshot)
 
+    def _tilesetEditorUnavailable(self):
+        """
+        The tileset editor still reads and writes the Wii U tileset format only.
+        Returns True (after telling the user) when it can't be used with the current game.
+        """
+        if not globals.IsNSMBUDX:
+            return False
+
+        QtWidgets.QMessageBox.information(
+            self, 'Pyamoto',
+            'The tileset editor does not support New Super Mario Bros. U Deluxe yet.\n\n'
+            'You can still place existing tilesets and objects in levels; '
+            'creating or editing tilesets requires the Wii U version for now.')
+        return True
+
     def EditTilesets(self):
         """
         Edits all tilesets in a merged window, opening to the slot active in the palette.
         """
+        if self._tilesetEditorUnavailable():
+            return
+
         # Determine which slot to open to based on active palette tab
         active_tab = self.objAllTab.currentIndex()
         if active_tab == 1:  # Embedded tab: use the active embedded sub-tab
@@ -6103,6 +6190,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def HandleImportObjects(self):
         """Open tileset editor and trigger Import Objects — user can save/discard."""
+        if self._tilesetEditorUnavailable():
+            return
+
         slots_data = []
         for slot in range(4):
             ts_name = getattr(globals.Area, f'tileset{slot}')
@@ -6153,6 +6243,31 @@ def _migrate_games_settings():
             remaining = old
         setSetting('LastMods', remaining)
         setSetting('LastGameDef', None)
+
+
+def _migrate_dx_settings():
+    """
+    Settings carried over from Miyamoto! DX (flagged "isDX") describe a New Super Mario
+    Bros. U Deluxe setup: move its game path into the Deluxe game slot and select Deluxe.
+    """
+    if not setting('isDX'):
+        return
+
+    legacy = setting('GamePath')
+    if legacy and not setting('GamePath_NSMBUDX'):
+        setSetting('GamePath_NSMBUDX', legacy)
+
+    # The old single "GamePath" held the Deluxe Course folder, not a Wii U one
+    setSetting('GamePath', None)
+
+    if setting('LastBaseGame') in (None, 'NSMBU'):
+        setSetting('LastBaseGame', 'NSMBUDX')
+
+    if not setting('SetupComplete', False) and isValidGamePath(setting('GamePath_NSMBUDX', ''), 'NSMBUDX'):
+        setSetting('SetupComplete', True)
+
+    setSetting('isDX', False)
+    globals.settings.sync()
 
 
 def _migrate_old_settings(new_path):
@@ -6267,17 +6382,14 @@ def main():
         setSetting('uiStyle', "Fusion")
         globals.settings.sync()
 
+    # Settings that came from Miyamoto! DX are a Deluxe setup
+    _migrate_dx_settings()
+
     # Existing users upgrading from builds that predate the interactive setup:
     # if they already have a valid game path, skip the wizard automatically.
     # Pass the path explicitly so this works before LoadGameDef() is called.
     if not setting('SetupComplete', False) and isValidGamePath(setting('GamePath', '')):
         setSetting('SetupComplete', True)
-
-    # Reject settings from the DX variant
-    if setting("isDX"):
-        warningBox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.NoIcon, 'Unsupported settings file', 'Your settings.json file is unsupported. Please remove it and run Pyamoto again.')
-        warningBox.exec_()
-        sys.exit(1)
 
     # Load theme and style from settings (respects defaults from default_settings.json)
     LoadTheme()
