@@ -26,7 +26,7 @@ brew install pyamoto
 Follow the guide on the [wiki](https://zenith.nsmbu.net/wiki/Miyamoto_Level_Editor).
 
 ### New Super Mario Bros. U Deluxe
-Pyamoto can edit the Switch version too. In the setup wizard (or **Preferences → Game Setup**) pick *New Super Mario Bros. U Deluxe* and select the `Course` folder from your dumped game's `romfs`; the `Unit` folder must sit right next to it, since Deluxe keeps its tilesets there. Levels are saved as plain little-endian `.sarc` files. The tileset editor does not support Deluxe yet.
+Pyamoto can edit the Switch version too. In the setup wizard (or **Preferences → Game Setup**) pick *New Super Mario Bros. U Deluxe* and select the `Course` folder from your dumped game's `romfs`; the `Unit` folder must sit right next to it, since Deluxe keeps its tilesets there. Levels are saved as plain little-endian `.sarc` files, and the tileset editor reads and writes the tileset files in `Unit` (Edit Tilesets opens the exact files the level uses; *Export Tileset* writes a standalone `.szs`).
 
 ## Changelog
 Read the [changelog](./CHANGELOG.md) for a full list of changes and additions.

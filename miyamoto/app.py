@@ -6148,28 +6148,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         if saveClip:
             globals.app.clipboard().setImage(screenshot)
 
-    def _tilesetEditorUnavailable(self):
-        """
-        The tileset editor still reads and writes the Wii U tileset format only.
-        Returns True (after telling the user) when it can't be used with the current game.
-        """
-        if not globals.IsNSMBUDX:
-            return False
-
-        QtWidgets.QMessageBox.information(
-            self, 'Pyamoto',
-            'The tileset editor does not support New Super Mario Bros. U Deluxe yet.\n\n'
-            'You can still place existing tilesets and objects in levels; '
-            'creating or editing tilesets requires the Wii U version for now.')
-        return True
-
     def EditTilesets(self):
         """
         Edits all tilesets in a merged window, opening to the slot active in the palette.
         """
-        if self._tilesetEditorUnavailable():
-            return
-
         # Determine which slot to open to based on active palette tab
         active_tab = self.objAllTab.currentIndex()
         if active_tab == 1:  # Embedded tab: use the active embedded sub-tab
@@ -6177,32 +6159,35 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         else:  # Main tab
             initial_slot = 0
 
-        # Build slot descriptors: (name, bytes_or_None, is_placeholder)
-        # TilesetEditor accepts bytes directly — no temp files needed.
+        self.showPuzzleWindow(self._tilesetSlotsData(), initial_slot)
+
+    @staticmethod
+    def _tilesetSlotsData():
+        """
+        Slot descriptors for the tileset editor: (name, archive bytes or None, is_placeholder).
+        The archive comes from the level (Wii U) or from the game's Unit folder (Deluxe), so the
+        editor opens exactly the tileset files the level in front of you uses.
+        """
         slots_data = []
         for slot in range(4):
             ts_name = getattr(globals.Area, f'tileset{slot}')
-            if ts_name and ts_name in globals.szsData:
-                slots_data.append((ts_name, globals.szsData[ts_name], False))
+            data = None
+            if ts_name:
+                try:
+                    data = GetTilesetArchiveData(ts_name)
+                except OSError as e:
+                    print(f'Could not read tileset {ts_name}: {e}')
+
+            if data:
+                slots_data.append((ts_name, data, False))
             else:
                 slots_data.append((f'Pa{slot}_MIYAMOTO_TEMP', None, True))
 
-        self.showPuzzleWindow(slots_data, initial_slot)
+        return slots_data
 
     def HandleImportObjects(self):
         """Open tileset editor and trigger Import Objects — user can save/discard."""
-        if self._tilesetEditorUnavailable():
-            return
-
-        slots_data = []
-        for slot in range(4):
-            ts_name = getattr(globals.Area, f'tileset{slot}')
-            if ts_name and ts_name in globals.szsData:
-                slots_data.append((ts_name, globals.szsData[ts_name], False))
-            else:
-                slots_data.append((f'Pa{slot}_MIYAMOTO_TEMP', None, True))
-
-        pw = PuzzleWindow(slots_data, Qt.Dialog)
+        pw = PuzzleWindow(self._tilesetSlotsData(), Qt.Dialog)
         if pw.forceClose:
             del pw
             return

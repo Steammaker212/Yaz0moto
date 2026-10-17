@@ -23,6 +23,8 @@ from . import misc
 from .gtx import RAWtoGTX
 import SarcLib
 from .tileset import HandleTilesetEdited, loadGTX, writeGTX
+from .tileset import loadTexFromBNTX, getTilesetBNTX, BuildTilesetArchiveDX, WriteTilesetFileDX
+from . import yaz0
 from .tileset import updateCollisionOverlay
 
 Tileset = None
@@ -211,6 +213,47 @@ class TilesetEditor(QtWidgets.QWidget):
 
         return Image, NmlMap, behaviourdata, objstrings, metadata
 
+    @staticmethod
+    def getDataDX(arc):
+        """
+        Deluxe: the textures are BNTX inside output.bfres, named after the tileset, so decode
+        them here. Returns (Image, NmlMap, behaviourdata, objstrings, metadata) like getData,
+        but with the two images already decoded (QImage).
+        """
+        Image = None
+        NmlMap = None
+        behaviourdata = None
+        objstrings = None
+        metadata = None
+
+        try:
+            hasBfres = arc['output.bfres'].data
+        except Exception:
+            hasBfres = None
+
+        for folder in arc.contents:
+            if folder.name == 'BG_chk':
+                for file in folder.contents:
+                    if file.name.startswith('d_bgchk_') and file.name.endswith('.bin'):
+                        behaviourdata = file.data
+                        internalName = file.name[len('d_bgchk_'):-len('.bin')]
+            elif folder.name == 'BG_unt':
+                for file in folder.contents:
+                    if file.name.endswith('_hd.bin'):
+                        metadata = file.data
+                    elif file.name.endswith('.bin'):
+                        objstrings = file.data
+
+        if hasBfres and behaviourdata is not None:
+            bntx = getTilesetBNTX(arc)
+            try:
+                Image = loadTexFromBNTX(bntx, internalName)
+                NmlMap = loadTexFromBNTX(bntx, internalName + '_nml')
+            except Exception as e:
+                print('Failed to decode the tileset textures:', e)
+
+        return Image, NmlMap, behaviourdata, objstrings, metadata
+
     def openTileset(self):
         '''Opens a Nintendo tileset sarc and parses the heck out of it.'''
 
@@ -221,7 +264,10 @@ class TilesetEditor(QtWidgets.QWidget):
             return False
 
         arc = SarcLib.SARC_Archive(data)
-        Image, NmlMap, behaviourdata, objstrings, metadata = self.getData(arc)
+        if globals.IsNSMBUDX:
+            Image, NmlMap, behaviourdata, objstrings, metadata = self.getDataDX(arc)
+        else:
+            Image, NmlMap, behaviourdata, objstrings, metadata = self.getData(arc)
 
         if not Image:
             QtWidgets.QMessageBox.warning(None, 'Error',  'Error - Couldn\'t load the image data')
@@ -239,8 +285,11 @@ class TilesetEditor(QtWidgets.QWidget):
         self.arc = arc
 
         # Loads the Image Data.
-        dest = loadGTX(Image)
-        destnml = loadGTX(NmlMap)
+        if globals.IsNSMBUDX:
+            dest, destnml = Image, NmlMap  # already decoded from the BNTX
+        else:
+            dest = loadGTX(Image)
+            destnml = loadGTX(NmlMap)
 
         self.tileImage = QtGui.QPixmap.fromImage(dest)
         self.nmlImage = QtGui.QPixmap.fromImage(destnml)
@@ -268,7 +317,7 @@ class TilesetEditor(QtWidgets.QWidget):
         # Load Objects
         meta = []
         for i in range(len(metadata) // 6):
-            meta.append(struct.unpack_from('>HBBH', metadata, i * 6))
+            meta.append(struct.unpack_from('<HBBH' if globals.IsNSMBUDX else '>HBBH', metadata, i * 6))
 
         tilelist = [[]]
         upperslope = [0, 0]
@@ -349,15 +398,17 @@ class TilesetEditor(QtWidgets.QWidget):
     def openTilesetfromFile(self):
         '''Opens a NSMBU tileset sarc from a file and parses the heck out of it.'''
 
-        path = QtWidgets.QFileDialog.getOpenFileName(self, "Open NSMBU Tileset", '',
-                    "All files (*)")[0]
+        path = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open NSMBU Deluxe Tileset" if globals.IsNSMBUDX else "Open NSMBU Tileset", '',
+            "Tileset files (*.szs);;All files (*)" if globals.IsNSMBUDX else "All files (*)")[0]
 
         if not path: return
 
-        name = '.'.join(os.path.basename(path).split('.')[:-1])
-
         with open(path, 'rb') as file:
             self.data = file.read()
+
+        if self.data[:4] == b'Yaz0':
+            self.data = yaz0.decompressFASTYZ(self.data)
 
         imported = self.openTileset()
         if imported: self.setDirty()
@@ -442,9 +493,15 @@ class TilesetEditor(QtWidgets.QWidget):
 
 
     def saveTileset(self):
+        previousName = eval('globals.Area.tileset%d' % self.slot)
+
         if self.slot == 0:
             filename = globals.Area.tileset0
             assert os.path.basename(self.name) == filename
+
+            if globals.IsNSMBUDX and not self._confirmOverwriteMainTilesetDX(filename):
+                return
+
             outdata = self.saving(filename)
 
         else:
@@ -453,7 +510,18 @@ class TilesetEditor(QtWidgets.QWidget):
                 filename, outdata = self.savingHashName()
                 exec("globals.Area.tileset%d = filename" % self.slot)
 
-        globals.szsData[filename] = outdata
+        if globals.IsNSMBUDX:
+            # Deluxe tilesets live in the game's Unit folder, not inside the level
+            try:
+                WriteTilesetFileDX(filename, outdata)
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self.window, 'Save Error', str(e))
+                if self.slot:
+                    # the new name was assigned above; put the previous one back
+                    exec("globals.Area.tileset%d = previousName" % self.slot)
+                return
+        else:
+            globals.szsData[filename] = outdata
 
         if self.slot == 0:
             from . import loading
@@ -495,7 +563,45 @@ class TilesetEditor(QtWidgets.QWidget):
         self.window.updateTabTitle(self)
 
 
+    def _confirmOverwriteMainTilesetDX(self, filename):
+        """
+        The main (Pa0) tileset is shared by every level that uses it, and Deluxe keeps it as a
+        file in Unit, so saving replaces that file. Confirm once per session.
+        """
+        if getattr(globals, '_dxMainTilesetConfirmed', False):
+            return True
+
+        path = globals.gamedef.FindTilesetFile(filename) or (filename + '.szs')
+        reply = QtWidgets.QMessageBox.question(
+            self.window, 'Overwrite main tileset?',
+            'The main tileset "%s" is shared by every level that uses it.\n\n'
+            'Saving will replace this file:\n%s\n\nContinue?' % (filename, path),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return False
+
+        globals._dxMainTilesetConfirmed = True
+        return True
+
     def saveTilesetAs(self):
+        if globals.IsNSMBUDX:
+            # Export as a standalone Deluxe tileset: <name>.szs (Yaz0-compressed SARC)
+            fn = QtWidgets.QFileDialog.getSaveFileName(
+                self.window, 'Export Deluxe tileset', self.name + '.szs', 'NSMBUDX tileset files (*.szs)')[0]
+            if fn == '': return
+
+            fn = str(fn)
+            if not fn.lower().endswith('.szs'):
+                fn += '.szs'
+
+            name = os.path.splitext(os.path.basename(fn))[0]
+            try:
+                WriteTilesetFileDX(name, self.saving(name), fn)
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self.window, 'Export Error', str(e))
+            return
+
         fn = QtWidgets.QFileDialog.getSaveFileName(self.window, 'Choose a new filename', '', 'All files (*)')[0]
         if fn == '': return
 
@@ -518,6 +624,10 @@ class TilesetEditor(QtWidgets.QWidget):
 
 
     def savingWithBuffers(self, name, textureBuffer, textureBufferNml, tileBuffer, objectBuffer, objectMetaBuffer):
+        if globals.IsNSMBUDX:
+            return BuildTilesetArchiveDX(name, textureBuffer, textureBufferNml, tileBuffer,
+                                         objectBuffer, objectMetaBuffer, self.animWidget.save())
+
         # Make an arc and pack up the files!
         arc = SarcLib.SARC_Archive()
 
@@ -628,6 +738,11 @@ class TilesetEditor(QtWidgets.QWidget):
 
         painter.end()
 
+        if globals.IsNSMBUDX:
+            bits = tex.bits()
+            bits.setsize(tex.byteCount())
+            return bytes(bits)
+
         return writeGTX(tex, self.slot, normalmap)
 
 
@@ -705,7 +820,7 @@ class TilesetEditor(QtWidgets.QWidget):
         Metabuffer = b''
         i = 0
         for a in objectStrings:
-            Metabuffer += struct.pack('>HBBH', len(Objbuffer), self.tileset.objects[i].width, self.tileset.objects[i].height, self.tileset.objects[i].getRandByte())
+            Metabuffer += struct.pack('<HBBH' if globals.IsNSMBUDX else '>HBBH', len(Objbuffer), self.tileset.objects[i].width, self.tileset.objects[i].height, self.tileset.objects[i].getRandByte())
             Objbuffer += a
             i += 1
 
@@ -4610,19 +4725,31 @@ class tileAnime(QtWidgets.QTabWidget):
 
     def load(self, arc, useAddrLib=False):
 
-        data = b''
-        for folder in arc.contents:
-            if folder.name == 'BG_tex':
-                for file in folder.contents:
-                    if file.name == '%s.gtx' % self.name:
-                        data = file.data
+        image = None
+        if globals.IsNSMBUDX:
+            # Deluxe: the animation is a texture inside the tileset's BNTX
+            try:
+                image = QtGui.QPixmap.fromImage(loadTexFromBNTX(getTilesetBNTX(arc), self.name))
+            except Exception:
+                print("Failed to acquire %s from the tileset's textures" % self.name)
 
-        if not data:
-            print("Failed to acquire %s.gtx" % self.name)
+        else:
+            data = b''
+            for folder in arc.contents:
+                if folder.name == 'BG_tex':
+                    for file in folder.contents:
+                        if file.name == '%s.gtx' % self.name:
+                            data = file.data
+
+            if not data:
+                print("Failed to acquire %s.gtx" % self.name)
+            else:
+                image = QtGui.QPixmap.fromImage(loadGTX(data, useAddrLib))
+
+        if image is None:
             frames = []
 
         else:
-            image = QtGui.QPixmap.fromImage(loadGTX(data, useAddrLib))
             width = image.width()
             height = image.height()
 
@@ -4634,7 +4761,7 @@ class tileAnime(QtWidgets.QTabWidget):
                 assert height % blockHeight * 64 == 0
 
             except AssertionError:
-                print("Invalid dimensions for %s.gtx: (%d, %d)" % (self.name, width, height))
+                print("Invalid dimensions for %s: (%d, %d)" % (self.name, width, height))
                 frames = []
 
             else:
@@ -4729,26 +4856,30 @@ class animWidget(QtWidgets.QWidget):
         if self.editor and self.editor.slot:
             return []
 
-        packTexture = self.packTexture
+        def entry(name, pixmap):
+            # Wii U: (name, GTX bytes); Deluxe: (name, raw RGBA8, width, height)
+            packed = self.packTexture(pixmap)
+            return (name, *packed) if isinstance(packed, tuple) else (name, packed)
+
         anime = []
 
         if self.block.frames:
-            anime.append((self.block.name, packTexture(self.block.allFramesPixmap())))
+            anime.append(entry(self.block.name, self.block.allFramesPixmap()))
 
         if self.hatena.frames:
-            anime.append((self.hatena.name, packTexture(self.hatena.allFramesPixmap())))
+            anime.append(entry(self.hatena.name, self.hatena.allFramesPixmap()))
 
         if self.blockL.frames:
-            anime.append((self.blockL.name, packTexture(self.blockL.allFramesPixmap())))
+            anime.append(entry(self.blockL.name, self.blockL.allFramesPixmap()))
 
         if self.hatenaL.frames:
-            anime.append((self.hatenaL.name, packTexture(self.hatenaL.allFramesPixmap())))
+            anime.append(entry(self.hatenaL.name, self.hatenaL.allFramesPixmap()))
 
         if self.tuka.frames:
-            anime.append((self.tuka.name, packTexture(self.tuka.allFramesPixmap())))
+            anime.append(entry(self.tuka.name, self.tuka.allFramesPixmap()))
 
         if self.belt.frames:
-            anime.append((self.belt.name, packTexture(self.belt.allFramesPixmap())))
+            anime.append(entry(self.belt.name, self.belt.allFramesPixmap()))
 
         return anime
 
@@ -4854,6 +4985,9 @@ class animWidget(QtWidgets.QWidget):
         bits.setsize(tex.byteCount())
         data = bits.asstring()
 
+        if globals.IsNSMBUDX:
+            return bytes(data), width * 64, height * 64
+
         return RAWtoGTX(width * 64, height * 64, 0x1a, bytes(4), len(data), [0, 1, 2, 3], 1, data)
 
 
@@ -4958,7 +5092,14 @@ class MainWindow(QtWidgets.QMainWindow):
             editor = TilesetEditor(self, name, data, slot, con)
             self.editors.append(editor)
             label = _TAB_NAMES[slot] if slot < len(_TAB_NAMES) else str(slot)
-            self.tabs.addTab(editor, label)
+            tabIndex = self.tabs.addTab(editor, label)
+
+            # Deluxe: show which file in Unit this slot edits (new/empty slots have none yet)
+            if globals.IsNSMBUDX and not con:
+                path = globals.gamedef.FindTilesetFile(name)
+                if path:
+                    self.tabs.setTabToolTip(tabIndex, path)
+
             if editor.forceClose:
                 self.forceClose = True
 

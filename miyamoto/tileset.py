@@ -1457,26 +1457,22 @@ def SaveTileset(idx):
     return arc.save()[0]
 
 
-def _SaveTilesetDX(name, tiledata, nmldata, colldata, deffile, indexfile):
+def BuildTilesetArchiveDX(name, tiledata, nmldata, colldata, deffile, indexfile, animations=()):
     """
-    Deluxe: tilesets are not embedded in the level. Write a Yaz0-compressed SARC
-    (BFRES with BNTX textures + collision + object data) into the game's Unit folder.
+    Deluxe tileset archive (uncompressed little-endian SARC): a BFRES holding the tile
+    textures as BNTX, plus the collision (BG_chk) and object (BG_unt) data.
+    tiledata/nmldata are raw 2048x512 RGBA8; animations is a list of
+    (animationName, rawRGBA8, width, height) extra textures (main tileset only).
     """
-    assert name
-
     template = globals.gamedef.file('tilesettemplate')
     if not template or not os.path.isfile(template):
         raise ValueError('The Deluxe tileset template (output.bfres) is missing from the Pyamoto data files.')
 
-    unitPaths = globals.gamedef.GetUnitPaths()
-    if not unitPaths:
-        raise ValueError(
-            'Could not save the tileset: no "Unit" folder was found next to your Deluxe "Course" folder.\n\n'
-            'Check the game path under Preferences > Game Setup.')
-
     arc = SarcLib.SARC_Archive(endianness='<')
 
-    bntx = writeBNTX([(name, tiledata, 2048, 512), ('%s_nml' % name, nmldata, 2048, 512)])
+    textures = [(name, tiledata, 2048, 512), ('%s_nml' % name, nmldata, 2048, 512)]
+    textures.extend(animations)
+    bntx = writeBNTX(textures)
 
     with open(template, 'rb') as file:
         bfresdata = file.read()
@@ -1492,9 +1488,37 @@ def _SaveTilesetDX(name, tiledata, nmldata, colldata, deffile, indexfile):
     unt.addFile(SarcLib.File('%s.bin' % name, deffile))
     unt.addFile(SarcLib.File('%s_hd.bin' % name, indexfile))
 
-    path = os.path.join(unitPaths[0], name + '.szs')
-    if not yaz0.compressFASTYZ(arc.save()[0], path):
+    return arc.save()[0]
+
+
+def WriteTilesetFileDX(name, sarcdata, path=None):
+    """
+    Yaz0-compresses a Deluxe tileset archive and writes it to `path`, or by default to
+    <name>.szs in the most specific Unit folder. Returns the path written.
+    """
+    if path is None:
+        unitPaths = globals.gamedef.GetUnitPaths()
+        if not unitPaths:
+            raise ValueError(
+                'Could not save the tileset: no "Unit" folder was found next to your Deluxe "Course" folder.\n\n'
+                'Check the game path under Preferences > Game Setup.')
+
+        path = os.path.join(unitPaths[0], name + '.szs')
+
+    if not yaz0.compressFASTYZ(sarcdata, path):
         raise ValueError('Could not save the tileset to:\n%s' % path)
+
+    return path
+
+
+def _SaveTilesetDX(name, tiledata, nmldata, colldata, deffile, indexfile):
+    """
+    Deluxe: tilesets are not embedded in the level. Write the archive into the game's
+    Unit folder instead.
+    """
+    assert name
+
+    WriteTilesetFileDX(name, BuildTilesetArchiveDX(name, tiledata, nmldata, colldata, deffile, indexfile))
 
     # Everything is on disk already; there is nothing to embed in the level
     return None
@@ -1791,6 +1815,43 @@ def HasTileset(name):
         return globals.gamedef.FindTilesetFile(name) is not None
 
     return name in globals.szsData
+
+
+def GetTilesetArchiveData(name):
+    """
+    The tileset's SARC archive as uncompressed bytes: embedded in the level (Wii U) or
+    read from the game's Unit folder (Deluxe). None if it isn't available.
+    """
+    if not name:
+        return None
+
+    if not globals.IsNSMBUDX:
+        return globals.szsData.get(name)
+
+    path = globals.gamedef.FindTilesetFile(name)
+    if path is None:
+        return None
+
+    with open(path, 'rb') as file:
+        data = file.read()
+
+    if data[:4] == b'Yaz0':
+        data = yaz0.decompressFASTYZ(data)
+
+    return data or None
+
+
+def getTilesetBNTX(arc):
+    """
+    The parsed BNTX of a Deluxe tileset archive. Parsing is cached on the archive object,
+    since the main textures and every animation come out of the same BNTX.
+    """
+    bntx = getattr(arc, '_pyamoto_bntx', None)
+    if bntx is None:
+        bntx = loadBNTXFromBFRES(arc['output.bfres'].data)
+        arc._pyamoto_bntx = bntx
+
+    return bntx
 
 
 def CascadeTilesetNames_Category(lower, upper):
