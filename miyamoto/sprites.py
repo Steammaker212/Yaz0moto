@@ -10075,7 +10075,7 @@ class SpriteImage_GhostShipBlock(SLib.SpriteImage_PivotRotationControlled):  # 5
         self.width = self.w << 4
         self.height = self.h << 4
 
-        pix = QtGui.QPixmap(self.width * 3.75, self.height * 3.75)
+        pix = QtGui.QPixmap(round(self.width * 3.75), round(self.height * 3.75))
         pix.fill(Qt.transparent)
 
         painter = QtGui.QPainter(pix)
@@ -11927,7 +11927,7 @@ class SpriteImage_PivotalIronBlock(SLib.SpriteImage_PivotRotationControlled):  #
         self.width = self.w << 4
         self.height = self.h << 4
 
-        pix = QtGui.QPixmap(self.width * 3.75, self.height * 3.75)
+        pix = QtGui.QPixmap(round(self.width * 3.75), round(self.height * 3.75))
         pix.fill(Qt.transparent)
 
         painter = QtGui.QPainter(pix)
@@ -11982,7 +11982,7 @@ class SpriteImage_ReMovingGhostHouseBlock(SLib.SpriteImage_PivotRotationControll
 
         self.updateSize()
 
-        pix = QtGui.QPixmap(self.width * 3.75, self.height * 3.75)
+        pix = QtGui.QPixmap(round(self.width * 3.75), round(self.height * 3.75))
         pix.fill(Qt.transparent)
 
         painter = QtGui.QPainter(pix)
@@ -12423,7 +12423,7 @@ class SpriteImage_CoinSnake(SLib.SpriteImage_StaticMultiple):  # 522
         self.width = (self.w << 4)
 
 
-        pix = QtGui.QPixmap((((stcType==1)* 90)+((stcType==2)* 90)+((stcType==3)* 30)) + (self.width * 7.5 - 60), (((stcType!=0)+1)*60))
+        pix = QtGui.QPixmap(round((((stcType==1)* 90)+((stcType==2)* 90)+((stcType==3)* 30)) + (self.width * 7.5 - 60)), (((stcType!=0)+1)*60))
         pix.fill(Qt.transparent)
 
         painter = QtGui.QPainter(pix)
