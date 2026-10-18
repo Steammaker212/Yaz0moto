@@ -108,8 +108,8 @@ check('CI names the release files Yaz0moto-v<version>-<platform>',
 check('CI uploads Yaz0moto-* artifacts only', 'path: Pyamoto' not in artifacts and artifacts.count('Yaz0moto-') >= 4)
 check('CI packages the new desktop file and icon',
       'buildtools/Yaz0moto.desktop' in artifacts and 'yaz0moto1024.png' in artifacts and 'chmod +x "${APPDIR}/AppRun" "${APPDIR}/Yaz0moto"' in artifacts)
-check('workflows build from main, not master', all('master' not in text for text in workflows.values())
-      and 'branches: [main]' in workflows['nightly.yml'])
+check('workflows build from deluxe-support, not master', all('master' not in text for text in workflows.values())
+      and 'branches: [deluxe-support]' in workflows['nightly.yml'])
 check('nightly rebuilds when bntxlib changes', "'bntxlib/**'" in workflows['nightly.yml'])
 check('release/nightly preflight checks the renamed entry point',
       all('yaz0moto.py' in workflows[f] and 'pyamoto.py' not in workflows[f] for f in ('release.yml', 'nightly.yml')))
