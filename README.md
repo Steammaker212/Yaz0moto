@@ -58,6 +58,8 @@ bash setup_venv.sh
 .venv\Scripts\python yaz0moto.py
 ```
 For detailed step‑by‑step instructions, please see the **[Deluxe-Setup](./Deluxe-Setup.md)**.
+### Credits
+**[Checkout Credits](./CREDITS.md)**
 
 ### Disclaimer
 AI tools are used in the development of this program.
