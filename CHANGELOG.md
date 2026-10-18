@@ -1,4 +1,30 @@
-# v1.0
+# Yaz0moto v1.0.0
+
+Yaz0moto is a fork of Pyamoto by Steammaker212 that adds full support for New Super Mario Bros. U Deluxe (Switch).
+
+## Features
+- Added New Super Mario Bros. U Deluxe as a base game. Pick it in the setup wizard or under Preferences > Game Setup, and point it at the `Course` folder of your dumped game; the `Unit` folder must be next to it
+- Deluxe levels are read and written as little-endian `.sarc` files; opening a level from the other game offers to switch games, and changing game in Preferences starts a new level
+- Deluxe tilesets are loaded from `Unit` (Yaz0 SARC with BNTX textures) and saved back there when edited
+- The tileset editor works with Deluxe: it opens the exact tileset files the level uses, saves them into `Unit` (the shared main tileset asks before overwriting), exports and imports standalone `.szs` tilesets, and handles the block, `?` block, coin and conveyor animations
+- In Deluxe mode the zone Background tab shows the real Deluxe file name (`dv_<name>.Nin_NX_NVN.szs`, in `romfs/Model`)
+- The Choose Level window also lists level files that have no name (Deluxe ships over 100 of them, worlds 40-50)
+- Miyamoto! DX settings are migrated into the Deluxe game slot
+
+## Changes
+- Renamed from Pyamoto to Yaz0moto: new name, icon and executable
+- Your settings, mods and downloaded data are copied from the `Pyamoto` user data folder to a new `Yaz0moto` folder on first launch (the original is left untouched)
+- The built-in updater now checks this project's releases instead of Pyamoto's
+- Crash reports and the About box point to this project's GitHub instead of the Zenith Discord
+- Builds and releases now run from the `main` branch
+
+## Fixes
+- Fixed a crash when saving a level whose zone background has a parallax mode the dropdown doesn't list: the value is now kept and shown as "Unknown (n)"
+- Fixed crashes on Python 3.10+ in sprites whose image size was a float
+- Fixed the setup wizard writing a Deluxe path into the Wii U game slot, and the Game Setup tab always picking the first game with a valid path
+- Fixed an error when switching from Deluxe to Wii U in Preferences
+
+# Pyamoto v1.0 (upstream history)
 
 ## Features
 - Added a welcome page
@@ -23,11 +49,6 @@
 - Open Level By Name: select levels from game or mod paths, add functionality for editing the associated world and names of levels in mods, add a shortcut for copying game levels to a mod project, add searchbar for filtering levels
 - Added new setting types: dualbox, strybble
 - Added an option to show a notes box in the actor properties window
-- Added support for New Super Mario Bros. U Deluxe (Switch): pick it as a base game under Game Setup. Levels are read and written as little-endian `.sarc` files and tilesets are loaded from the `Unit` folder next to `Course`. Opening a level from the other version offers to switch games
-- The tileset editor now works with Deluxe: it opens the tileset files a level uses from `Unit`, saves edited tilesets back there (the main tileset asks before overwriting), and exports/imports standalone `.szs` tilesets, including animations
-- Fixed crashes on Python 3.10+ in sprites whose image size was a float
-- Fixed a crash when saving a level whose zone background has a parallax mode the dropdown doesn't list: the value is now kept and shown as "Unknown (n)"
-- In Deluxe mode the Background tab shows the Deluxe file name (`dv_<name>.Nin_NX_NVN.szs`, in `romfs/Model`), and the Choose Level window also lists level files that have no name (Deluxe ships over 100 of them)
 - Added the ability to make spritedata options conditional on another value
 - Patches may now provide their own `data` folder which can be referenced to bundle custom assets in a level archive
 - Added a new "Dark Red" default theme

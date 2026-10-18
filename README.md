@@ -1,56 +1,62 @@
-<img alt="banner" src="https://github.com/user-attachments/assets/ab7c7183-2f5c-4e8b-8f54-1283ba3ddfb3" />
-<div align="center">
-    <img alt="wiiu" height="56" src="https://github.com/user-attachments/assets/c22393cf-f619-4a1c-bc99-de68d5d903fa">
-    <a href="https://go.nsmbu.net/discord">
-        <img alt="discord" height="56" src="https://github.com/user-attachments/assets/f43b9deb-376a-48cd-bc09-8117cde071bb">
-    </a>
-    <a href="https://zenith.nsmbu.net/wiki/Pyamoto_Level_Editor">
-        <img alt="docs" height="56" src="https://github.com/user-attachments/assets/f492ac70-08e4-4894-a4f8-a8a829d9e4e4">
-    </a>
-</div>
+<img alt="Yaz0moto" src="docs/banner.png" />
 
 ## Overview
-Pyamoto is an advanced fork of the original Miyamoto editor with the purpose of improving functionality and usability.
+Yaz0moto is a level editor for **New Super Mario Bros. U** (Wii U) and **New Super Mario Bros. U Deluxe** (Switch), with full tileset editing for both games.
+
+It is a fork of [Pyamoto](https://github.com/Zenith-Team/Pyamoto) by Zenith Team, which is itself a fork of [Miyamoto!](https://github.com/aboood40091/Miyamoto). Yaz0moto adds Deluxe support, using code from Miyamoto! DX. It is maintained by [Steammaker212](https://github.com/Steammaker212). See [CREDITS.md](./CREDITS.md) for everyone whose work this builds on.
 
 ## Installation
-Download the latest automated release from the [releases page](https://github.com/Zenith-Team/Pyamoto/releases/latest).
+Download the latest build for your system from the [releases page](https://github.com/Steammaker212/Yaz0moto/releases/latest):
 
-**macOS** users can also install via [Homebrew](https://brew.sh/):
-```sh
-brew tap zenith-team/tap
-brew trust zenith-team/tap
-brew install pyamoto
-```
+| System | File |
+|---|---|
+| Windows (x64) | `Yaz0moto-v<version>-Windows-x64.zip` - unzip and run `Yaz0moto.exe` |
+| macOS (universal) | `Yaz0moto-v<version>-macOS-universal.zip` - unzip and open `Yaz0moto.app` |
+| Linux (x86_64) | `Yaz0moto-v<version>-Linux-x86_64.AppImage` (or the `.zip`) |
+
+The builds are not code-signed, so Windows SmartScreen or macOS Gatekeeper may warn you the first time; on macOS, right-click the app and choose *Open*. Yaz0moto checks this project's releases for updates (see Preferences).
+
+On first launch, the setup wizard helps you download the required data and point the editor at your game files. If you used Pyamoto before, your settings and data are copied across automatically (Pyamoto itself is left untouched).
 
 ## Usage
-Follow the guide on the [wiki](https://zenith.nsmbu.net/wiki/Miyamoto_Level_Editor).
+General editing works as in Pyamoto; the [NSMBU wiki](https://zenith.nsmbu.net/wiki/Miyamoto_Level_Editor) has a guide.
 
 ### New Super Mario Bros. U Deluxe
-Pyamoto can edit the Switch version too. In the setup wizard (or **Preferences → Game Setup**) pick *New Super Mario Bros. U Deluxe* and select the `Course` folder from your dumped game's `romfs`; the `Unit` folder must sit right next to it, since Deluxe keeps its tilesets there. Levels are saved as plain little-endian `.sarc` files, and the tileset editor reads and writes the tileset files in `Unit` (Edit Tilesets opens the exact files the level uses; *Export Tileset* writes a standalone `.szs`).
+Pick *New Super Mario Bros. U Deluxe* in the setup wizard (or **Preferences > Game Setup**) and select the `Course` folder from your dumped game's `romfs`. The `Unit` folder, where Deluxe keeps its tilesets, must sit right next to it. See [Deluxe-Setup.md](./Deluxe-Setup.md) for the full walkthrough.
+
+- Levels are saved as plain little-endian `.sarc` files.
+- **Edit Tilesets** opens the exact tileset files the open level uses, and saves them back into `Unit`. *Export Tileset* writes a standalone `.szs`, and *Import Tileset from file* reads one.
+- In the zone Background tab, the file name shown is the real Deluxe one (`dv_<name>.Nin_NX_NVN.szs`, in `romfs/Model`), which is where a custom background model goes.
+- Opening a level from the other game offers to switch games; switching game in Preferences starts a new level.
+
+You must provide your own legally obtained game files.
 
 ## Changelog
 Read the [changelog](./CHANGELOG.md) for a full list of changes and additions.
 
-## Interested in contributing?
-Dev discussions are in the `#nsmbu` channel in the [Zenith Discord](https://go.nsmbu.net/discord). 
-
-External contributions and fixes are welcome through Pull Requests and the Issues tab. Check [Running From Source](#running-from-source) to setup a local development env.
+## Contributing
+Bug reports and feature requests go in the [Issues tab](https://github.com/Steammaker212/Yaz0moto/issues). Pull requests are welcome; see [Running from Source](#running-from-source) to set up a development environment. `tests/deluxe_smoke_test.py` and `tests/branding_test.py` are quick checks to run before sending a change.
 
 ## Running from Source
 
-**Prerequisites:** [Python 3](https://www.python.org/downloads/) (Windows: check "Add Python to PATH" during install), Git.
+**Prerequisites:** [Python 3](https://www.python.org/downloads/) (Windows: check "Add Python to PATH" during install), Git, and a C compiler for the Cython extensions (Windows: Visual Studio Build Tools with the *Desktop development with C++* workload).
 
 ```bash
-git clone https://github.com/Zenith-Team/Pyamoto
-cd Pyamoto
+git clone --recurse-submodules https://github.com/Steammaker212/Yaz0moto
+cd Yaz0moto
 bash setup_venv.sh
 
 # macOS/Linux
-.venv/bin/python3 pyamoto.py
+.venv/bin/python3 yaz0moto.py
 
 # or on Windows:
-.venv\Scripts\python pyamoto.py
+.venv\Scripts\python yaz0moto.py
 ```
+
+Windows users can follow [Deluxe-Setup.md](./Deluxe-Setup.md), which covers building the required extension step by step.
+
+## License
+Yaz0moto is free software under the GNU General Public License v3.0, like the projects it is based on. See [license.txt](./license.txt).
 
 ### Disclaimer
 AI tools are used in the development of this program.
