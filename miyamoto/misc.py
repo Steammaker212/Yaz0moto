@@ -265,7 +265,7 @@ class SpriteDefinition:
     def _nybble_spec_to_bit_range(spec):
         """
         Convert a nybble specification (e.g. '6', '12', '6.2', '6-8') to a
-        bit range tuple (start, end+1) in Pyamoto's 1-indexed, big-endian bit scheme.
+        bit range tuple (start, end+1) in Yaz0moto's 1-indexed, big-endian bit scheme.
         Returns a single (start, end) tuple.
         """
         parts = spec.split('-', 1)

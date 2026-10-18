@@ -49,10 +49,10 @@ jobs:
               print(f"  OK  miyamoto.globals  ->  v{MiyamotoVersion}")
           except Exception as e:
               errors.append(f"miyamoto.globals import failed: {e}")
-          if not os.path.isfile("pyamoto.py"):
-              errors.append("pyamoto.py entry point is missing")
+          if not os.path.isfile("yaz0moto.py"):
+              errors.append("yaz0moto.py entry point is missing")
           else:
-              print("  OK  pyamoto.py exists")
+              print("  OK  yaz0moto.py exists")
           with open("build.py") as f:
               src = f.read()
           if "from globals import" in src:

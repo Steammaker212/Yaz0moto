@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Pyamoto Level Editor — entry point
-# Run this file directly: python pyamoto.py
+# Yaz0moto Level Editor — entry point
+# Run this file directly: python yaz0moto.py
 
 import os
 import sys

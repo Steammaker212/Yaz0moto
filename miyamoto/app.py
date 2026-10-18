@@ -125,8 +125,8 @@ def _excepthook(*exc_info):
     logFile = "log.txt"
     notice = \
         """An unhandled exception occurred. Please report the problem """\
-        """in the Zenith Discord server: https://go.nsmbu.net/discord\n"""\
-        """A log will be written to "%s".\n\nIt is recommended that you restart Pyamoto immediately!"""\
+        """on GitHub: https://github.com/Steammaker212/Yaz0moto/issues\n"""\
+        """A log will be written to "%s".\n\nIt is recommended that you restart Yaz0moto immediately!"""\
         """\n\nError information:\n""" % logFile
 
     timeString = time.strftime("%Y-%m-%d, %H:%M:%S")
@@ -237,9 +237,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         # set up the window
         super().__init__(None)
-        _base_title = 'Pyamoto Nightly' if globals.MiyamotoReleaseType == 'nightly' else 'Pyamoto'
+        _base_title = 'Yaz0moto Nightly' if globals.MiyamotoReleaseType == 'nightly' else 'Yaz0moto'
         self.setWindowTitle(_base_title)
-        _icon_name = 'pyamoto1024mac.png' if platform.system() == 'Darwin' else 'pyamoto1024.png'
+        _icon_name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
         self.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', _icon_name)))
         self.setIconSize(QtCore.QSize(16, 16))
         self.setUnifiedTitleAndToolBarOnMac(True)
@@ -477,8 +477,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         self.CreateAction(
             'showdatafolder', self.HandleShowDataFolder, GetIcon('open'),
-            "Show Pyamoto Data Folder",
-            "Opens the Pyamoto user data folder in the system file manager.",
+            "Show Yaz0moto Data Folder",
+            "Opens the Yaz0moto user data folder in the system file manager.",
             None,
         )
 
@@ -491,14 +491,14 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         self.CreateAction(
             'preferences', self.HandlePreferences, GetIcon('settings'),
-            'Pyamoto Preferences...',
-            'Change important Pyamoto settings',
+            'Yaz0moto Preferences...',
+            'Change important Yaz0moto settings',
             QtGui.QKeySequence('Ctrl+Alt+P'),
         )
 
         self.CreateAction(
             'exit', self.HandleExit, GetIcon('delete'),
-            'Exit Pyamoto',
+            'Exit Yaz0moto',
             'Exit the editor',
             QtGui.QKeySequence.Quit,
         )
@@ -976,12 +976,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Creates the help menu. This is separate because both the menubar uses this
         """
-        self.CreateAction('infobox', self.AboutBox, GetIcon('help'), 'About Pyamoto',
+        self.CreateAction('infobox', self.AboutBox, GetIcon('help'), 'About Yaz0moto',
                           'Info about the program, and the team behind it', QtGui.QKeySequence('Ctrl+Shift+I'))
         self.CreateAction('wiki', self.OpenWiki, GetIcon('contents'), 'Wiki',
                           'Open the Zenith wiki in your browser', QtGui.QKeySequence('Ctrl+Shift+H'))
         self.CreateAction('aboutqt', QtWidgets.qApp.aboutQt, GetIcon('qt'), 'About PyQt...',
-                          'About the Qt library Pyamoto is based on', QtGui.QKeySequence('Ctrl+Shift+Q'))
+                          'About the Qt library Yaz0moto is based on', QtGui.QKeySequence('Ctrl+Shift+Q'))
 
         # On macOS, Qt auto-moves actions with "About" in their text to the Application menu.
         self.actions['infobox'].setMenuRole(QtWidgets.QAction.NoRole)
@@ -2167,7 +2167,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         clip = encoded.split('|')[1:-1]
 
         if len(clip) > 300:
-            result = QtWidgets.QMessageBox.warning(self, 'Pyamoto', "You're trying to paste over 300 items at once.<br>This may take a while (depending on your computer speed), are you sure you want to continue?",
+            result = QtWidgets.QMessageBox.warning(self, 'Yaz0moto', "You're trying to paste over 300 items at once.<br>This may take a while (depending on your computer speed), are you sure you want to continue?",
                                                    QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No)
             if result != QtWidgets.QMessageBox.Yes: return
 
@@ -2351,7 +2351,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             clip = encoded[13:-2].split('|')
 
             if placeObjects and len(clip) > 300:
-                result = QtWidgets.QMessageBox.warning(self, 'Pyamoto', "You're trying to paste over 300 items at once.<br>This may take a while (depending on your computer speed), are you sure you want to continue?",
+                result = QtWidgets.QMessageBox.warning(self, 'Yaz0moto', "You're trying to paste over 300 items at once.<br>This may take a while (depending on your computer speed), are you sure you want to continue?",
                                                        QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No)
                 if result == QtWidgets.QMessageBox.No:
                     return layers, sprites, entrances, locations, paths, nabbitPaths, comments
@@ -2817,7 +2817,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         Adds a new area to the level
         """
         if len(globals.Level.areas) >= 4:
-            QtWidgets.QMessageBox.warning(self, 'Pyamoto', "You have reached the maximum amount of areas in this level.<br>Due to the game's limitations, Pyamoto only allows you to add up to 4 areas to a level.")
+            QtWidgets.QMessageBox.warning(self, 'Yaz0moto', "You have reached the maximum amount of areas in this level.<br>Due to the game's limitations, Yaz0moto only allows you to add up to 4 areas to a level.")
             return
 
         if self.CheckDirty():
@@ -2840,7 +2840,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         Imports an area from another level
         """
         if len(globals.Level.areas) >= 4:
-            QtWidgets.QMessageBox.warning(self, 'Pyamoto', "You have reached the maximum amount of areas in this level.<br>Due to the game's limitations, Pyamoto only allows you to add up to 4 areas to a level.")
+            QtWidgets.QMessageBox.warning(self, 'Yaz0moto', "You have reached the maximum amount of areas in this level.<br>Due to the game's limitations, Yaz0moto only allows you to add up to 4 areas to a level.")
             return
 
         if globals.Dirty:
@@ -3029,7 +3029,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Deletes the current area
         """
-        result = QtWidgets.QMessageBox.warning(self, 'Pyamoto', 'Are you <b>sure</b> you want to delete this area?<br><br>The level will automatically save afterwards - there is no way<br>you can undo the deletion or get it back afterwards!',
+        result = QtWidgets.QMessageBox.warning(self, 'Yaz0moto', 'Are you <b>sure</b> you want to delete this area?<br><br>The level will automatically save afterwards - there is no way<br>you can undo the deletion or get it back afterwards!',
                                                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                                                QtWidgets.QMessageBox.No)
         if result == QtWidgets.QMessageBox.No: return
@@ -3069,7 +3069,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def HandleShowDataFolder(self):
         """
-        Open the Pyamoto user data folder in the system file manager
+        Open the Yaz0moto user data folder in the system file manager
         """
         path = globals.user_data_path
         os.makedirs(path, exist_ok=True)
@@ -3224,7 +3224,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         # Warn the user only if they changed a setting that requires a restart (theme or toolbar)
         if dlg.needsRestart():
-            QtWidgets.QMessageBox.warning(None, 'Pyamoto Preferences', 'You may need to restart Pyamoto for changes to take effect.')
+            QtWidgets.QMessageBox.warning(None, 'Yaz0moto Preferences', 'You may need to restart Yaz0moto for changes to take effect.')
 
     def updateOpenByNameState(self):
         """Enable or disable Open Level by Name based on whether any game path exists."""
@@ -3268,7 +3268,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     return
             # File not found in that game path — warn but don't fall through silently
             QtWidgets.QMessageBox.warning(
-                self, 'Pyamoto',
+                self, 'Yaz0moto',
                 f'Could not find "{level_name}" in:\n{game_path}\n\n'
                 'Check the game path for this game in Preferences → Game Setup.',
                 QtWidgets.QMessageBox.Ok)
@@ -3346,7 +3346,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         python_exe = sys.executable
         script_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'pyamoto.py',
+            'yaz0moto.py',
         )
         try:
             subprocess.Popen([python_exe, script_path, '-level', filepath])
@@ -3403,7 +3403,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         except IOError as e:
             QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Pyamoto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
+                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
             return False
 
         globals.Dirty = False
@@ -3448,7 +3448,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         except IOError as e:
             QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Pyamoto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
+                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
             return False
 
         globals.Dirty = False
@@ -3507,7 +3507,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         except IOError as e:
             QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Pyamoto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
+                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
             return False
 
         globals.Dirty = False
@@ -3542,7 +3542,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             ('Deluxe', 'Wii U', 'NSMBUDX') if isDeluxeLevel else ('Wii U', 'Deluxe', 'NSMBU'))
 
         reply = QtWidgets.QMessageBox.question(
-            self, 'Pyamoto',
+            self, 'Yaz0moto',
             'This looks like a New Super Mario Bros. U %s level, but the %s version is selected.\n\n'
             'Switch to the %s version? (Active mods will be turned off.)' % (wanted, current, wanted),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
@@ -4120,12 +4120,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 if os.path.isfile(checkname):
                     break
             else:
-                QtWidgets.QMessageBox.warning(self, 'Pyamoto',
+                QtWidgets.QMessageBox.warning(self, 'Yaz0moto',
                                               'Could not find file:<br>[name]'.replace('[name]', str(checkname)),
                                               QtWidgets.QMessageBox.Ok)
                 return False
             if not IsNSMBLevel(checkname):
-                QtWidgets.QMessageBox.warning(self, 'Pyamoto', "This file doesn't seem to be a valid level.",
+                QtWidgets.QMessageBox.warning(self, 'Yaz0moto', "This file doesn't seem to be a valid level.",
                                               QtWidgets.QMessageBox.Ok)
                 return False
 
@@ -6335,7 +6335,7 @@ def main():
     if path is not None:
         os.chdir(path)
 
-    print(f'[Pyamoto] v{globals.MiyamotoVersion} ({globals.MiyamotoReleaseType})  |  data: {globals.miyamoto_path}  |  user data: {globals.user_data_path}')
+    print(f'[Yaz0moto] v{globals.MiyamotoVersion} ({globals.MiyamotoReleaseType})  |  data: {globals.miyamoto_path}  |  user data: {globals.user_data_path}')
 
     # Load settings from platform user-data directory (never in the repo root)
     settings_path = os.path.join(globals.user_data_path, 'settings.json')
@@ -6426,9 +6426,9 @@ def main():
     SLib.main()
 
     # Set the default window icon (used for random popups and stuff)
-    _icon_name = 'pyamoto1024mac.png' if platform.system() == 'Darwin' else 'pyamoto1024.png'
+    _icon_name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
     globals.app.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', _icon_name)))
-    globals.app.setApplicationDisplayName('Pyamoto')
+    globals.app.setApplicationDisplayName('Yaz0moto')
 
     gt = setting('GridType')
     if gt == 'checker':

@@ -2,7 +2,7 @@ import os
 import subprocess
 import shutil
 
-app_bundle = 'build/Pyamoto.app'
+app_bundle = 'build/Yaz0moto.app'
 intel_deps = 'intel_deps'
 
 def get_arch(path):
@@ -36,7 +36,7 @@ def merge_binaries():
     merged_count = 0
     for root, dirs, files in os.walk(app_bundle):
         for file in files:
-            if file.endswith('.so') or file.endswith('.dylib') or file == 'Python' or file == 'Pyamoto':
+            if file.endswith('.so') or file.endswith('.dylib') or file == 'Python' or file == 'Yaz0moto':
                 path = os.path.join(root, file)
                 if os.path.islink(path): continue
                     

@@ -822,8 +822,8 @@ def LoadActionsLists():
         ('Export Level As...', False, 'saveas'),
         ('Level Information...', False, 'metainfo'),
         ('Level Screenshot...', True, 'screenshot'),
-        ('Pyamoto Preferences...', False, 'preferences'),
-        ('Exit Pyamoto', False, 'exit'),
+        ('Yaz0moto Preferences...', False, 'preferences'),
+        ('Exit Yaz0moto', False, 'exit'),
     )
     globals.EditActions = (
         ('Undo', True, 'undo'),
@@ -872,7 +872,7 @@ def LoadActionsLists():
         ('View Sprite Map', False, 'viewspritemap'),
     )
     globals.HelpActions = (
-        ('About Pyamoto', False, 'infobox'),
+        ('About Yaz0moto', False, 'infobox'),
         ('Wiki', False, 'wiki'),
         ('About PyQt...', False, 'aboutqt'),
     )

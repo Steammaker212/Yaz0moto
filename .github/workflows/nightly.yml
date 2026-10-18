@@ -2,7 +2,7 @@ name: Nightly Build
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'miyamoto/**'
       - '*.py'
@@ -13,6 +13,7 @@ on:
       - 'FastYZ/**'
       - 'addrlib/**'
       - 'bc3/**'
+      - 'bntxlib/**'
       - 'buildtools/*.py'
       - 'requirements.txt'
       - '.github/workflows/**'
@@ -29,7 +30,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   preflight:
     name: Preflight checks
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,10 +47,10 @@ jobs:
               print(f"  OK  miyamoto.globals  ->  v{MiyamotoVersion}")
           except Exception as e:
               errors.append(f"miyamoto.globals import failed: {e}")
-          if not os.path.isfile("pyamoto.py"):
-              errors.append("pyamoto.py entry point is missing")
+          if not os.path.isfile("yaz0moto.py"):
+              errors.append("yaz0moto.py entry point is missing")
           else:
-              print("  OK  pyamoto.py exists")
+              print("  OK  yaz0moto.py exists")
           with open("build.py") as f:
               src = f.read()
           if "from globals import" in src:
@@ -81,7 +82,7 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   prepare:
     name: Prepare build metadata
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -105,7 +106,7 @@ jobs:
   # Build all platform artifacts (reusable workflow)
   # ──────────────────────────────────────────────────────────────
   build:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/main'
     needs: [preflight, prepare]
     uses: ./.github/workflows/build-artifacts.yml
     with:

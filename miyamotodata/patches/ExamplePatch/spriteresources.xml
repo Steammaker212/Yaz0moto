@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
     spriteresources.xml — Maps sprite IDs to the game-file resource names that
-    Pyamoto should load for editor previews.
+    Yaz0moto should load for editor previews.
 
     Structure:
         <spriteresources>

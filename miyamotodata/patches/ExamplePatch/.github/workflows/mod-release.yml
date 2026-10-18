@@ -1,8 +1,8 @@
 name: Mod Release
 
-# Pyamoto mod release workflow.
+# Yaz0moto mod release workflow.
 # Push a version tag (e.g. v1.1) or use workflow_dispatch.
-# Produces patch.zip — Pyamoto fetches this for one-click updates.
+# Produces patch.zip — Yaz0moto fetches this for one-click updates.
 
 on:
   push:
@@ -62,6 +62,6 @@ jobs:
           body: |
             ## Version ${{ steps.ver.outputs.version }}
 
-            Install in Pyamoto: Preferences → Game Setup → + → Download Patch from URL.
+            Install in Yaz0moto: Preferences → Game Setup → + → Download Patch from URL.
 
             Set `patchReleaseUrl="https://github.com/${{ github.repository }}"` in `main.xml` for one-click updates.

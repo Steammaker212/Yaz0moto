@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Merge x86_64 PyQt5 binaries into an arm64 Pyamoto.app bundle in-place,
+Merge x86_64 PyQt5 binaries into an arm64 Yaz0moto.app bundle in-place,
 producing a universal (arm64 + x86_64) app ready for DMG packaging.
 
 Usage:

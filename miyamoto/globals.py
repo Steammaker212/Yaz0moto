@@ -127,14 +127,32 @@ ModifyInnerName = False
 
 # user_data_path must be resolved before miyamoto_path so it can be included
 # in the miyamotodata search candidates (downloaded data lives here).
-def _user_data_path():
+def _user_data_parent():
     if platform.system() == 'Darwin':
-        return os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Pyamoto')
+        return os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
     elif platform.system() == 'Windows':
-        return os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Pyamoto')
+        return os.environ.get('APPDATA', os.path.expanduser('~'))
     else:
-        xdg = os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
-        return os.path.join(xdg, 'Pyamoto')
+        return os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config'))
+
+
+def _user_data_path():
+    new = os.path.join(_user_data_parent(), 'Yaz0moto')
+    old = os.path.join(_user_data_parent(), 'Pyamoto')
+
+    # Yaz0moto began as a fork of Pyamoto: on first launch, carry the existing settings,
+    # mods and downloaded data over. This is a copy, so Pyamoto keeps working untouched.
+    if not os.path.exists(new) and os.path.isdir(old):
+        import shutil
+        try:
+            shutil.copytree(old, new)
+            print('[Yaz0moto] Copied your Pyamoto settings and data from %s' % old)
+        except (OSError, shutil.Error) as e:
+            # A half-finished copy would be mistaken for a complete one next time
+            shutil.rmtree(new, ignore_errors=True)
+            print('[Yaz0moto] Could not copy Pyamoto data (%s); starting fresh.' % e)
+
+    return new
 
 user_data_path = _user_data_path()
 

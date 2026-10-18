@@ -62,12 +62,12 @@ jobs:
         shell: pwsh
         run: |
           $v = "${{ inputs.version }}"
-          7z a -mx=9 -tzip "Pyamoto-v$v-Windows-x64.zip" ".\distrib\miyamoto_v$v\*"
+          7z a -mx=9 -tzip "Yaz0moto-v$v-Windows-x64.zip" ".\distrib\miyamoto_v$v\*"
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
-          path: Pyamoto-*.zip
+          path: Yaz0moto-*.zip
           retention-days: 7
 
 
@@ -103,17 +103,17 @@ jobs:
         run: |
           PYQT5_PARENT=$(python3 -c \
             "import os, PyQt5; print(os.path.dirname(os.path.dirname(PyQt5.__file__)))")
-          python buildtools/merge_pyqt5.py build/Pyamoto.app "$PYQT5_PARENT"
+          python buildtools/merge_pyqt5.py build/Yaz0moto.app "$PYQT5_PARENT"
 
       - name: Ad-hoc sign bundle
-        run: codesign --force --deep --sign - build/Pyamoto.app
+        run: codesign --force --deep --sign - build/Yaz0moto.app
 
       - name: Pre-package cleanup (flatten broken symlinks)
         run: |
           python - <<'EOF'
           import sys, os, os.path, shutil
           print('>> Performing macOS specific prepacking...')
-          app_path = 'build/Pyamoto.app'
+          app_path = 'build/Yaz0moto.app'
           if os.path.isdir(app_path):
               macos_dir = os.path.join(app_path, 'Contents/MacOS')
               res_dir = os.path.join(app_path, 'Contents/Resources')
@@ -132,12 +132,12 @@ jobs:
       - name: Package macOS-universal.zip
         run: |
           V="${{ inputs.version }}"
-          cd build && zip -r -9 -X "../Pyamoto-v${V}-macOS-universal.zip" Pyamoto.app
+          cd build && zip -r -9 -X "../Yaz0moto-v${V}-macOS-universal.zip" Yaz0moto.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: Pyamoto-*-macOS-universal.zip
+          path: Yaz0moto-*-macOS-universal.zip
           retention-days: 7
 
 
@@ -182,10 +182,10 @@ jobs:
           APPDIR="AppDir"
           mkdir -p "${APPDIR}"
           cp -r "distrib/miyamoto_v${V}/." "${APPDIR}/"
-          cp buildtools/Pyamoto.desktop "${APPDIR}/Pyamoto.desktop"
-          cp miyamotodata/app_icons/pyamoto1024.png "${APPDIR}/Pyamoto.png"
+          cp buildtools/Yaz0moto.desktop "${APPDIR}/Yaz0moto.desktop"
+          cp miyamotodata/app_icons/yaz0moto1024.png "${APPDIR}/Yaz0moto.png"
           cp buildtools/AppRun           "${APPDIR}/AppRun"
-          chmod +x "${APPDIR}/AppRun" "${APPDIR}/Pyamoto"
+          chmod +x "${APPDIR}/AppRun" "${APPDIR}/Yaz0moto"
 
       - name: Download appimagetool
         run: |
@@ -199,17 +199,17 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 \
           ARCH=x86_64 \
             ./appimagetool --no-appstream AppDir \
-            "Pyamoto-v${V}-Linux-x86_64.AppImage"
+            "Yaz0moto-v${V}-Linux-x86_64.AppImage"
 
       - name: Package updater zip
         run: |
           V="${{ inputs.version }}"
-          cd "distrib/miyamoto_v${V}" && zip -r -9 -X "../../Pyamoto-v${V}-Linux-x86_64.zip" .
+          cd "distrib/miyamoto_v${V}" && zip -r -9 -X "../../Yaz0moto-v${V}-Linux-x86_64.zip" .
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64-appimage
           path: |
-            Pyamoto-*.AppImage
-            Pyamoto-*-Linux-x86_64.zip
+            Yaz0moto-*.AppImage
+            Yaz0moto-*-Linux-x86_64.zip
           retention-days: 7

@@ -1,4 +1,4 @@
 #!/bin/bash
 SELF_DIR="$(dirname "$(readlink -f "$0")")"
 cd "${SELF_DIR}"
-exec "${SELF_DIR}/Pyamoto" "$@"
+exec "${SELF_DIR}/Yaz0moto" "$@"

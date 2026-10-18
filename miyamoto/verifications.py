@@ -71,7 +71,7 @@ def FilesAreMissing():
 
     data_dir = os.path.join(globals.miyamoto_path, 'miyamotodata')
     if not os.path.isdir(data_dir):
-        QtWidgets.QMessageBox.warning(None, 'Error', 'Sorry, you seem to be missing the required data files for Pyamoto to work. Please redownload your copy of the editor.')
+        QtWidgets.QMessageBox.warning(None, 'Error', 'Sorry, you seem to be missing the required data files for Yaz0moto to work. Please redownload your copy of the editor.')
         return True
 
     nsmbu_required = ['main.xml', 'spritedata.xml', 'spritecategories.xml', 'bg.xml',
@@ -88,7 +88,7 @@ def FilesAreMissing():
 
     if len(missing) > 0:
         QtWidgets.QMessageBox.warning(None, 'Error',
-                                      'Sorry, you seem to be missing some of the required data files for Pyamoto to work. Please redownload your copy of the editor. These are the files you are missing: [files]'.replace('[files]', str(', '.join(missing))))
+                                      'Sorry, you seem to be missing some of the required data files for Yaz0moto to work. Please redownload your copy of the editor. These are the files you are missing: [files]'.replace('[files]', str(', '.join(missing))))
         return True
 
     return False

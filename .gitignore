@@ -20,10 +20,10 @@ addrlib
 bc3
 *.so
 *.c
-/pyamoto.dmgcanvas
-/Pyamoto.egg-info
+/yaz0moto.dmgcanvas
+/Yaz0moto.egg-info
 .DS_Store
-pyamoto.sh
+yaz0moto.sh
 
 /tools/*/*.tmp
 /tools/*/*.gtx

@@ -1269,7 +1269,7 @@ def writeGTX(tex, idx, nml=False):
     else:
         tool_path = os.path.join(globals.miyamoto_path, 'tools', 'mac')
 
-    with tempfile.TemporaryDirectory(prefix='pyamoto-tileset-') as tile_path:
+    with tempfile.TemporaryDirectory(prefix='yaz0moto-tileset-') as tile_path:
         dds_path = os.path.join(tile_path, 'tmp.dds')
 
         if idx != 0 and not globals.UseRGBA8:  # Save as DXT5/BC3
@@ -1466,7 +1466,7 @@ def BuildTilesetArchiveDX(name, tiledata, nmldata, colldata, deffile, indexfile,
     """
     template = globals.gamedef.file('tilesettemplate')
     if not template or not os.path.isfile(template):
-        raise ValueError('The Deluxe tileset template (output.bfres) is missing from the Pyamoto data files.')
+        raise ValueError('The Deluxe tileset template (output.bfres) is missing from the Yaz0moto data files.')
 
     arc = SarcLib.SARC_Archive(endianness='<')
 

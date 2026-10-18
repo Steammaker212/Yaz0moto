@@ -73,7 +73,7 @@ class InputBox(QtWidgets.QDialog):
 
 class AboutDialog(QtWidgets.QDialog):
     """
-    The About info for Pyamoto
+    The About info for Yaz0moto
     """
 
     def __init__(self):
@@ -81,11 +81,11 @@ class AboutDialog(QtWidgets.QDialog):
         Creates and initializes the dialog
         """
         super().__init__()
-        self.setWindowTitle('About Pyamoto')
+        self.setWindowTitle('About Yaz0moto')
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         import platform as _platform
-        icon_name = 'pyamoto1024mac.png' if _platform.system() == 'Darwin' else 'pyamoto1024.png'
+        icon_name = 'yaz0moto1024mac.png' if _platform.system() == 'Darwin' else 'yaz0moto1024.png'
         icon_path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', icon_name)
         if os.path.isfile(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
@@ -110,7 +110,7 @@ class AboutDialog(QtWidgets.QDialog):
             layout.addSpacing(14)
 
         # Heading
-        heading = QtWidgets.QLabel('Pyamoto Level Editor')
+        heading = QtWidgets.QLabel('Yaz0moto Level Editor')
         heading.setAlignment(Qt.AlignHCenter)
         hf = heading.font()
         hf.setPointSize(hf.pointSize() + 5)
@@ -128,8 +128,8 @@ class AboutDialog(QtWidgets.QDialog):
 
         # Description
         desc = QtWidgets.QLabel(
-            'An advanced fork of the original Miyamoto editor with the purpose of '
-            'improving functionality and usability for creating New Super Mario Bros. U levels.')
+            'A level editor for New Super Mario Bros. U and New Super Mario Bros. U Deluxe, '
+            'with tileset editing for both games. A fork of Pyamoto.')
         desc.setAlignment(Qt.AlignHCenter)
         desc.setWordWrap(True)
         desc.setStyleSheet('color: palette(text);')
@@ -157,24 +157,28 @@ class AboutDialog(QtWidgets.QDialog):
         # Links
         links = QtWidgets.QLabel(
             '<html><body style="text-align:center;">'
-            '&#x1F30D; <a href="https://github.com/Zenith-Team/Pyamoto">GitHub</a>'
+            '&#x1F30D; <a href="https://github.com/Steammaker212/Yaz0moto">GitHub</a>'
             ' &nbsp;&middot;&nbsp; '
-            '&#x1F4AC; <a href="https://go.nsmbu.net/discord">Discord</a>'
+            '&#x1F41B; <a href="https://github.com/Steammaker212/Yaz0moto/issues">Report a bug</a>'
             ' &nbsp;&middot;&nbsp; '
-            '&#x1F4D6; <a href="https://zenith.nsmbu.net/">Wiki</a>'
+            '&#x1F4D6; <a href="https://zenith.nsmbu.net/">NSMBU Wiki</a>'
             '</body></html>')
         links.setTextFormat(Qt.RichText)
         links.setOpenExternalLinks(True)
         links.setAlignment(Qt.AlignHCenter)
+        links.setWordWrap(True)
         layout.addWidget(links)
         layout.addSpacing(16)
 
         # Credits
         credits = QtWidgets.QLabel(
             '<html><body style="text-align:center;">'
-            'Maintained by <b>Zenith Team</b>.<br>'
+            'Yaz0moto is maintained by <b>Steammaker212</b>.<br>'
+            'Based on <b>Pyamoto</b> by Zenith Team and <b>Miyamoto!</b> by AboodXD, Gota7 and contributors.<br>'
+            'Deluxe support uses code from Miyamoto! DX.<br>'
             '</body></html>')
         credits.setAlignment(Qt.AlignHCenter)
+        credits.setWordWrap(True)
         credits.setStyleSheet('color: palette(mid); font-size: 11px;')
         layout.addWidget(credits)
         layout.addSpacing(20)
@@ -185,8 +189,10 @@ class AboutDialog(QtWidgets.QDialog):
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
 
-        self.adjustSize()
-        self.setFixedSize(440, self.sizeHint().height())
+        # Wrapped labels only know their height once the width is fixed
+        self.setFixedWidth(440)
+        height = layout.totalHeightForWidth(440)
+        self.setFixedSize(440, height if height > 0 else self.sizeHint().height())
 
 
 class ObjectShiftDialog(QtWidgets.QDialog):
@@ -1615,7 +1621,7 @@ class AutoSavedInfoDialog(QtWidgets.QDialog):
         icon = QtWidgets.QLabel()
         hlayout.addWidget(icon)
 
-        label = QtWidgets.QLabel("Pyamoto has found some level data which wasn't saved - possibly due to a crash within the editor or by your computer. Do you want to restore this level?<br><br>If you pick No, the autosaved level data will be deleted and will no longer be accessible.<br><br>Original file path: [path]".replace('[path]', str(filename)))
+        label = QtWidgets.QLabel("Yaz0moto has found some level data which wasn't saved - possibly due to a crash within the editor or by your computer. Do you want to restore this level?<br><br>If you pick No, the autosaved level data will be deleted and will no longer be accessible.<br><br>Original file path: [path]".replace('[path]', str(filename)))
         label.setWordWrap(True)
         hlayout.addWidget(label)
         hlayout.setStretch(1, 1)
@@ -1845,7 +1851,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         Creates and initializes the dialog
         """
         super().__init__()
-        self.setWindowTitle('Pyamoto Preferences')
+        self.setWindowTitle('Yaz0moto Preferences')
         self.setWindowIcon(GetIcon('settings'))
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
@@ -2346,7 +2352,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 _act_new.setToolTip('Create a new empty mod.')
                 _act_import = add_mod_menu.addAction(
                     GetIcon('openfromfile'), 'Import Mod Folder…', lambda: _import_mod())
-                _act_import.setToolTip('Copy a mod folder to the Pyamoto user mods.')
+                _act_import.setToolTip('Copy a mod folder to the Yaz0moto user mods.')
                 _act_link = add_mod_menu.addAction(
                     GetIcon('folderpath'), 'Link Mod Folder…', lambda: _link_mod())
                 _act_link.setToolTip('Symlink an external folder. Any edits will affect the source folder.')
@@ -2824,7 +2830,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                             QtWidgets.QMessageBox.warning(
                                 self_inner, 'Invalid Patch',
                                 'Downloaded file does not contain a main.xml.\n'
-                                'This is not a valid Pyamoto mod.')
+                                'This is not a valid Yaz0moto mod.')
                             return
 
                         slug = _patch_slug_from_url(url, patch_name)
@@ -3613,7 +3619,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
                 self_inner.dataRow = _DownloadRow(
                     title="Game Data",
-                    description="Core resources required by Pyamoto to create levels.",
+                    description="Core resources required by Yaz0moto to create levels.",
                     url=DATA_DOWNLOAD_URL,
                     tmp_name="_data_download.zip",
                     extract_dir=data_saved,
@@ -3753,11 +3759,11 @@ class WelcomeDialog(QtWidgets.QDialog):
         self.action = None
         self.recent_path = None
 
-        self.setWindowTitle('Pyamoto')
+        self.setWindowTitle('Yaz0moto')
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         import platform as _platform
-        icon_name = 'pyamoto1024mac.png' if _platform.system() == 'Darwin' else 'pyamoto1024.png'
+        icon_name = 'yaz0moto1024mac.png' if _platform.system() == 'Darwin' else 'yaz0moto1024.png'
         icon_path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', icon_name)
         if os.path.isfile(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
@@ -3780,7 +3786,7 @@ class WelcomeDialog(QtWidgets.QDialog):
             layout.addSpacing(14)
 
         # Heading
-        heading = QtWidgets.QLabel('Welcome to Pyamoto')
+        heading = QtWidgets.QLabel('Welcome to Yaz0moto')
         heading.setAlignment(Qt.AlignHCenter)
         hf = heading.font()
         hf.setPointSize(hf.pointSize() + 5)

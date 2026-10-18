@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""GitHub release checker and self-updater for packaged Pyamoto builds."""
+"""GitHub release checker and self-updater for packaged Yaz0moto builds."""
 
 import hashlib
 import os
@@ -25,7 +25,7 @@ from . import globals
 from .misc import setting, setSetting
 
 
-GITHUB_REPO = 'Zenith-Team/Pyamoto'
+GITHUB_REPO = 'Steammaker212/Yaz0moto'
 _API_BASE = f'https://api.github.com/repos/{GITHUB_REPO}/releases'
 _API_LATEST = f'{_API_BASE}/latest'
 _API_RECENT = f'{_API_BASE}?per_page=30'
@@ -35,7 +35,7 @@ _MAX_EXTRACTED_SIZE = 4 * 1024 * 1024 * 1024
 _HEADERS = {
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': f'Pyamoto/{globals.MiyamotoVersion} updater',
+    'User-Agent': f'Yaz0moto/{globals.MiyamotoVersion} updater',
 }
 
 CHANNEL_RELEASE = 'release'
@@ -241,8 +241,8 @@ def _install_location():
         app = next((parent for parent in (executable, *executable.parents)
                     if parent.name.endswith('.app')), None)
         if app is None:
-            raise UpdateError('Could not locate the installed Pyamoto app bundle.')
-        return InstallLocation('bundle', app, app / 'Contents' / 'MacOS' / 'Pyamoto')
+            raise UpdateError('Could not locate the installed Yaz0moto app bundle.')
+        return InstallLocation('bundle', app, app / 'Contents' / 'MacOS' / 'Yaz0moto')
 
     return InstallLocation('directory', executable.parent, executable)
 
@@ -318,22 +318,22 @@ def _download_asset(asset, output_path, progress=None):
 def _prepare_update(release, progress=None):
     location = _install_location()
     if location is None:
-        raise UpdateError('Automatic updates are available only in packaged Pyamoto builds.')
+        raise UpdateError('Automatic updates are available only in packaged Yaz0moto builds.')
     if not location.target.exists():
-        raise UpdateError('Current Pyamoto installation could not be found.')
+        raise UpdateError('Current Yaz0moto installation could not be found.')
     if not os.access(str(location.target.parent), os.W_OK):
-        raise UpdateError('Pyamoto does not have permission to update this installation.')
+        raise UpdateError('Yaz0moto does not have permission to update this installation.')
 
     asset = _asset_for_platform(release, appimage=location.kind == 'appimage')
     if asset is None:
         raise UpdateError('This release has no update package for the current platform.')
 
-    work = Path(tempfile.mkdtemp(prefix='pyamoto-update-'))
+    work = Path(tempfile.mkdtemp(prefix='yaz0moto-update-'))
     download = work / asset['name']
     try:
         _download_asset(asset, download, progress)
         if location.kind == 'appimage':
-            staged = work / 'Pyamoto.AppImage'
+            staged = work / 'Yaz0moto.AppImage'
             download.replace(staged)
             staged.chmod(staged.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         else:
@@ -342,14 +342,14 @@ def _prepare_update(release, progress=None):
             _safe_extract(download, extracted)
             download.unlink()
             if location.kind == 'bundle':
-                staged = extracted / 'Pyamoto.app'
+                staged = extracted / 'Yaz0moto.app'
                 if not staged.is_dir():
-                    raise UpdateError('macOS update does not contain Pyamoto.app.')
-                if not (staged / 'Contents' / 'MacOS' / 'Pyamoto').is_file():
-                    raise UpdateError('macOS update does not contain the Pyamoto executable.')
+                    raise UpdateError('macOS update does not contain Yaz0moto.app.')
+                if not (staged / 'Contents' / 'MacOS' / 'Yaz0moto').is_file():
+                    raise UpdateError('macOS update does not contain the Yaz0moto executable.')
             else:
                 staged = extracted
-                expected_name = 'Pyamoto.exe' if sys.platform == 'win32' else 'Pyamoto'
+                expected_name = 'Yaz0moto.exe' if sys.platform == 'win32' else 'Yaz0moto'
                 if not (staged / expected_name).is_file():
                     raise UpdateError(f'Update does not contain {expected_name}.')
         return location, staged, work
@@ -452,7 +452,7 @@ class _UpdateChecker(QtCore.QObject):
 
     def start(self, channel):
         self._channel = channel
-        threading.Thread(target=self._run, name='Pyamoto update check', daemon=True).start()
+        threading.Thread(target=self._run, name='Yaz0moto update check', daemon=True).start()
 
     def _run(self):
         try:
@@ -476,7 +476,7 @@ class _UpdateWorker(QtCore.QObject):
 
     def start(self, release):
         self._release = release
-        threading.Thread(target=self._run, name='Pyamoto update download', daemon=True).start()
+        threading.Thread(target=self._run, name='Yaz0moto update download', daemon=True).start()
 
     def _run(self):
         try:
@@ -497,7 +497,7 @@ class _UpdateDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self._release = release
         channel = 'Nightly' if release.channel == CHANNEL_NIGHTLY else 'Release'
-        self.setWindowTitle(f'Pyamoto {channel} Update Available')
+        self.setWindowTitle(f'Yaz0moto {channel} Update Available')
         self.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
         self.setMinimumWidth(480)
 
@@ -579,7 +579,7 @@ def _start_check(channel, manual=False):
     _checker = _UpdateChecker()
     _checker.update_found.connect(_on_update_found)
     if manual:
-        _checker.up_to_date.connect(lambda: _show_info('Pyamoto is up to date.'))
+        _checker.up_to_date.connect(lambda: _show_info('Yaz0moto is up to date.'))
         _checker.failed.connect(_show_error)
     _checker.finished.connect(_check_finished)
     _checker.start(channel)
@@ -634,7 +634,7 @@ def _begin_download(release):
     _progress = QtWidgets.QProgressDialog(
         'Downloading and verifying update...', '', 0, 100, globals.mainWindow
     )
-    _progress.setWindowTitle('Pyamoto Update')
+    _progress.setWindowTitle('Yaz0moto Update')
     _progress.setWindowModality(QtCore.Qt.ApplicationModal)
     _progress.setCancelButton(None)
     _progress.setMinimumDuration(0)
@@ -700,8 +700,8 @@ def _clear_dirty_restore():
 
 
 def _show_info(text):
-    QtWidgets.QMessageBox.information(globals.mainWindow, 'Pyamoto Update', text)
+    QtWidgets.QMessageBox.information(globals.mainWindow, 'Yaz0moto Update', text)
 
 
 def _show_error(text):
-    QtWidgets.QMessageBox.warning(globals.mainWindow, 'Pyamoto Update', text)
+    QtWidgets.QMessageBox.warning(globals.mainWindow, 'Yaz0moto Update', text)

@@ -34,7 +34,7 @@ OBJECTS_DOWNLOAD_URL = "https://github.com/nsmbu/editor-assets/releases/download
 # ---------------------------------------------------------------------------
 
 def _icon_path():
-    name = 'pyamoto1024mac.png' if platform.system() == 'Darwin' else 'pyamoto1024.png'
+    name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
     if globals.miyamoto_path:
         p = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', name)
         if os.path.isfile(p):
@@ -211,7 +211,7 @@ class _WelcomePage(QtWidgets.QWidget):
         layout.addSpacing(20)
 
         # Title
-        title = QtWidgets.QLabel("Welcome to Pyamoto")
+        title = QtWidgets.QLabel("Welcome to Yaz0moto")
         title.setAlignment(Qt.AlignHCenter)
         font = title.font()
         font.setPointSize(font.pointSize() + 10)
@@ -234,7 +234,7 @@ class _WelcomePage(QtWidgets.QWidget):
         # Description
         desc = QtWidgets.QLabel(
             "This setup will guide you through required steps to start making levels.<br><hr>"
-            "<h2>Resources</h2>Join our <a href=\"https://go.nsmbu.net/discord\">Discord</a> and visit the <a href=\"https://zenith.nsmbu.net/\">Wiki</a>")
+            "<h2>Resources</h2>Visit the <a href=\"https://github.com/Steammaker212/Yaz0moto\">GitHub page</a> for help and bug reports, and the <a href=\"https://zenith.nsmbu.net/\">NSMBU Wiki</a>")
         desc.setAlignment(Qt.AlignHCenter)
         desc.setWordWrap(True)
         desc.setTextFormat(Qt.RichText)
@@ -401,7 +401,7 @@ class _DownloadPage(QtWidgets.QWidget):
         layout.addWidget(heading)
 
         sub = QtWidgets.QLabel(
-            "Get the files needed to run Pyamoto. ")
+            "Get the files needed to run Yaz0moto. ")
         sub.setWordWrap(True)
         sub.setStyleSheet("color: palette(mid);")
         layout.addWidget(sub)
@@ -411,7 +411,7 @@ class _DownloadPage(QtWidgets.QWidget):
         # across app updates and is never bundled inside the app.
         self.dataRow = _DownloadRow(
             title="Game Data",
-            description="Core resources required by Pyamoto to create levels.",
+            description="Core resources required by Yaz0moto to create levels.",
             url=DATA_DOWNLOAD_URL,
             tmp_name="_data_download.zip",
             extract_dir=os.path.join(globals.user_data_path, 'data'),
@@ -475,7 +475,7 @@ class _GamePathPage(QtWidgets.QWidget):
         layout.addWidget(heading)
 
         sub = QtWidgets.QLabel(
-            "Point Pyamoto to your game files to load levels properly.")
+            "Point Yaz0moto to your game files to load levels properly.")
         sub.setWordWrap(True)
         sub.setStyleSheet("color: palette(mid);")
         layout.addWidget(sub)
@@ -571,7 +571,7 @@ class _ThemePage(QtWidgets.QWidget):
         layout.addWidget(heading)
 
         sub = QtWidgets.QLabel(
-            "Customize the look of Pyamoto. You can change this later in Preferences.")
+            "Customize the look of Yaz0moto. You can change this later in Preferences.")
         sub.setWordWrap(True)
         sub.setStyleSheet("color: palette(mid);")
         layout.addWidget(sub)
@@ -626,7 +626,7 @@ class _AllSetPage(QtWidgets.QWidget):
         layout.addSpacing(8)
 
         if first_run:
-            msg = "Pyamoto is configured and ready to use.\nHave fun making levels!"
+            msg = "Yaz0moto is configured and ready to use.\nHave fun making levels!"
         else:
             msg = "Your configuration has been updated successfully."
 
@@ -661,7 +661,7 @@ class InteractiveSetupDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self._first_run = first_run
 
-        self.setWindowTitle("Pyamoto Setup")
+        self.setWindowTitle("Yaz0moto Setup")
         self.setMinimumSize(640, 500)
         self.setFixedSize(680, 520)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
@@ -780,7 +780,7 @@ class InteractiveSetupDialog(QtWidgets.QDialog):
             msg.setWindowTitle("Skip Game Path?")
             msg.setIcon(QtWidgets.QMessageBox.Warning)
             msg.setText(
-                "Without a game path, Pyamoto cannot open levels from the original game.\n\n"
+                "Without a game path, Yaz0moto cannot open levels from the original game.\n\n"
                 "You can set the game path later in Preferences > Game Setup.")
             msg.setStandardButtons(
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)

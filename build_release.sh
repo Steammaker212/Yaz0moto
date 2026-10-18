@@ -20,7 +20,7 @@ cd "$SCRIPT_DIR"
 CURRENT_VERSION="$(.venv/bin/python3 -c 'import json; print(json.load(open("project.json"))["version"])')"
 VERSION="${1:-$CURRENT_VERSION}"
 
-echo "==> Building Pyamoto release v${VERSION}"
+echo "==> Building Yaz0moto release v${VERSION}"
 
 # ── Patch project.json (restore on exit) ────────────────────────────────────
 cp project.json project.json.bak
@@ -37,8 +37,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
     .venv/bin/python3 build.py build_ext --inplace bdist_mac
     echo "==> Packaging app bundle as zip..."
     ARCH=$(uname -m)
-    cd build && zip -r "../Pyamoto-v${VERSION}-macOS-${ARCH}.zip" Pyamoto.app && cd ..
-    echo "==> Done. Zip: Pyamoto-v${VERSION}-macOS-${ARCH}.zip"
+    cd build && zip -r "../Yaz0moto-v${VERSION}-macOS-${ARCH}.zip" Yaz0moto.app && cd ..
+    echo "==> Done. Zip: Yaz0moto-v${VERSION}-macOS-${ARCH}.zip"
 else
     echo "==> Linux/Windows: building frozen executable"
     .venv/bin/python3 build.py build_ext --inplace build_exe

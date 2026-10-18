@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!--
-    main.xml — The patch descriptor. Pyamoto reads this to know:
+    main.xml — The patch descriptor. Yaz0moto reads this to know:
       - The mod's display name, version, and description.
       - Which base game (or other mod) this patch layers on top of via `base`.
       - Which data files this patch provides, and whether each one is additive

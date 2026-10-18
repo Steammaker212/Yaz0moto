@@ -155,7 +155,7 @@ else:
 # Set it up
 base = 'gui' if sys.platform == 'win32' else None
 setup(
-    name = 'Pyamoto',
+    name = 'Yaz0moto',
     version = _SetupVersion,
     description = 'New Super Mario Bros. U Level Editor',
     options={
@@ -169,8 +169,8 @@ setup(
             'include_files': include_files
             },
         'bdist_mac': {
-            'bundle_name': 'Pyamoto',
-            'iconfile': 'miyamotodata/app_icons/pyamoto.icns',
+            'bundle_name': 'Yaz0moto',
+            'iconfile': 'miyamotodata/app_icons/yaz0moto.icns',
         }
         },
     cmdclass = cmdclass_dict,
@@ -178,8 +178,8 @@ setup(
                             bntx_swizzle_ext, bntx_formconv_ext, bntx_bcn_decompress_ext], language_level=3),
     executables = [
         Executable(
-            'pyamoto.py',
-            target_name = 'Pyamoto',
+            'yaz0moto.py',
+            target_name = 'Yaz0moto',
             icon = 'miyamotodata/app_icons/win_icon.ico',
             base = base,
             ),
@@ -192,7 +192,7 @@ print('>> Built frozen executable!')
 # Post-build finalization
 if 'bdist_mac' in sys.argv:
     print('>> Performing macOS specific finalization...')
-    app_path = 'build/Pyamoto.app'
+    app_path = 'build/Yaz0moto.app'
     if os.path.isdir(app_path):
         settings_path = os.path.join(app_path, 'Contents/MacOS/settings.ini')
         if os.path.isfile(settings_path):

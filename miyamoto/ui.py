@@ -84,7 +84,7 @@ class MiyamotoTheme:
         self.version = 1.0
         self.themeName = 'Classic'
         self.creator = 'Treeki, Tempus'
-        self.description = 'The default Pyamoto theme.'
+        self.description = 'The default Yaz0moto theme.'
         self.iconCacheSm = {}
         self.iconCacheLg = {}
         self.style = None
