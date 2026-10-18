@@ -308,6 +308,15 @@ if os.path.isfile(_wiiu):
     globals.IsNSMBUDX = False                                   # read it as the Wii U file it is
     real = puzzle.TilesetEditor(win, 'Pa0_jyotyu', _data, 0, False)
     before = _snapshot(real)
+
+    # the Wii U path must keep working too: save it as a Wii U tileset and read that back
+    wiiu_archive = real.saving('Pa0_jyotyu')
+    wiiu_again = _snapshot(puzzle.TilesetEditor(win, 'Pa0_jyotyu', wiiu_archive, 0, False))
+    check('Wii U archive is still a big-endian SARC with GTX textures',
+          wiiu_archive[:4] == b'SARC' and wiiu_archive[6:8] == b'\xfe\xff' and b'.gtx' in wiiu_archive[:4096])
+    for key in before:
+        check('real tileset saved as Wii U keeps its %s' % key, before[key] == wiiu_again[key])
+
     globals.IsNSMBUDX = True                                    # ...and write it as a Deluxe tileset
     dx_archive = real.saving('Pa0_jyotyu')
     again = puzzle.TilesetEditor(win, 'Pa0_jyotyu', dx_archive, 0, False)

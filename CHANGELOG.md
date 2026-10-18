@@ -16,7 +16,7 @@ Yaz0moto is a fork of Pyamoto by Steammaker212 that adds full support for New Su
 - Your settings, mods and downloaded data are copied from the `Pyamoto` user data folder to a new `Yaz0moto` folder on first launch (the original is left untouched)
 - The built-in updater now checks this project's releases instead of Pyamoto's
 - Crash reports and the About box point to this project's GitHub instead of the Zenith Discord
-- Builds and releases now run from the `main` branch
+- Builds and releases now run from the `deluxe-support` branch
 
 ## Fixes
 - Fixed a crash when saving a level whose zone background has a parallax mode the dropdown doesn't list: the value is now kept and shown as "Unknown (n)"

@@ -3,12 +3,12 @@
 Notes for whoever maintains Yaz0moto.
 
 ## Branches
-- `main` is the only long-lived branch. Development, nightly builds and releases all come from it.
+- `deluxe-support` is the default and only long-lived branch. Development, nightly builds and releases all come from it.
 - Pull requests run the **Tests** workflow (`tests/deluxe_smoke_test.py` and `tests/branding_test.py`).
 
 ## Cutting a release
 1. Add a new section at the top of `CHANGELOG.md` (`# Yaz0moto vX.Y.Z`).
-2. Make sure the **Tests** workflow is green on `main`.
+2. Make sure the **Tests** workflow is green on `deluxe-support`.
 3. Tag and push:
    ```
    git tag v1.0.1
@@ -26,7 +26,7 @@ Version rules:
 - Never reuse the tags `v1.0`, `v1.0.1` or `v1.2` that came with the fork from Pyamoto.
 
 ## Nightly builds
-Pushes to `main` that touch code or data publish a pre-release named `nightly-<date>-<sha>`. Users who
+Pushes to `deluxe-support` that touch code or data publish a pre-release named `nightly-<date>-<sha>`. Users who
 choose the nightly update channel in Preferences receive these.
 
 ## What the updater checks
@@ -39,11 +39,11 @@ and `Yaz0moto.AppImage` inside. If you rename the repository or the program, cha
 ```
 git remote add upstream https://github.com/Zenith-Team/Pyamoto.git   # once
 git fetch upstream
-git checkout -b sync-upstream main
+git checkout -b sync-upstream deluxe-support
 git merge upstream/master
 ```
 Expect conflicts in lines that were renamed (strings, `pyamoto.py` -> `yaz0moto.py`, workflows). Resolve them
-keeping the Yaz0moto names, run both tests, then open a pull request into `main`. Keep upstream's licence
+keeping the Yaz0moto names, run both tests, then open a pull request into `deluxe-support`. Keep upstream's licence
 headers and credits as they are.
 
 ## Branding

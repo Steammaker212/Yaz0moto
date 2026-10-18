@@ -219,5 +219,37 @@ check('crash dialog points to this project\'s issues', ('https://github.com/%s/i
 check('relaunching (new window) starts yaz0moto.py', "'yaz0moto.py'" in app_src and "'pyamoto.py'" not in app_src)
 check('exported-object files from Pyamoto are still readable', "'__pyamoto_props__'" in read('miyamoto/puzzle.py'))
 
+# ---------------------------------------------------------------- documentation links
+def slug(heading):
+    heading = re.sub(r'[^\w\- ]', '', heading.strip().lower())
+    return heading.replace(' ', '-')
+
+
+DOCS = ['README.md', 'CHANGELOG.md', 'CREDITS.md', 'Deluxe-Setup.md', 'Deluxe-Changelog.md', 'docs/RELEASING.md']
+broken = []
+for doc in DOCS:
+    if not os.path.isfile(doc):
+        broken.append('%s is missing' % doc)
+        continue
+    base = os.path.dirname(doc)
+    for target in re.findall(r'\]\(([^)\s]+)\)', read(doc)):
+        if target.startswith(('http://', 'https://', 'mailto:')):
+            continue
+        path, _, anchor = target.partition('#')
+        file = os.path.normpath(os.path.join(base, path)) if path else doc
+        if not os.path.exists(os.path.join(ROOT, file)):
+            broken.append('%s -> %s (file not found)' % (doc, target))
+        elif anchor and file.endswith('.md'):
+            anchors = {slug(h) for h in re.findall(r'(?m)^#{1,6} +(.+?)\s*$', read(file))}
+            if anchor not in anchors:
+                broken.append('%s -> %s (no such heading)' % (doc, target))
+check('every link between the docs resolves (files and #anchors)', not broken, '\n      ' + '\n      '.join(broken))
+readme = read('README.md')
+check('README links the Deluxe changelog and the credits', '(./Deluxe-Changelog.md)' in readme and '(./CREDITS.md)' in readme)
+stale = [d for d in DOCS if 'Steammaker212/Pyamoto' in read(d) or 'Zenith-Team/Yaz0moto' in read(d)]
+check('docs use the Yaz0moto repository name', not stale, ', '.join(stale))
+check('docs name the branch the workflows actually use',
+      'deluxe-support' in read('docs/RELEASING.md') and 'deluxe-support' in workflows['nightly.yml'])
+
 print('\n%d/%d passed' % (sum(ok for _, ok in results), len(results)))
 sys.exit(0 if all(ok for _, ok in results) else 1)

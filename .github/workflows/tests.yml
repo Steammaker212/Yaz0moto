@@ -1,6 +1,6 @@
 name: Tests
 
-# Quick checks that run on every push to main and on pull requests:
+# Quick checks that run on every push to deluxe-support and on pull requests:
 #   - deluxe_smoke_test.py: Deluxe levels, tilesets and the tileset editor (round trips)
 #   - branding_test.py:     name/updater/build/CI consistency (the updater must never point at another project)
 
