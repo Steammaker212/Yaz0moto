@@ -35,7 +35,7 @@ You must provide your own legally obtained game files.
 Read the [changelog](./CHANGELOG.md) for a full list of changes and additions.
 
 ## Contributing
-Bug reports and feature requests go in the [Issues tab](https://github.com/Steammaker212/Yaz0moto/issues). Pull requests are welcome; see [Running from Source](#running-from-source) to set up a development environment. `tests/deluxe_smoke_test.py` and `tests/branding_test.py` are quick checks to run before sending a change.
+Bug reports and feature requests go in the [Issues tab](https://github.com/Steammaker212/Yaz0moto/issues). Pull requests are welcome; see [Running from Source](#running-from-source) to set up a development environment. Maintainers: see [docs/RELEASING.md](./docs/RELEASING.md). `tests/deluxe_smoke_test.py` and `tests/branding_test.py` are quick checks to run before sending a change.
 
 ## Running from Source
 
