@@ -44,3 +44,4 @@ Credits inherited from Pyamoto:
 * RoadrunnerWMC - Stamps offset fixes
 * Toms - Spritedata, Testing on macOS
 * Wexos - Original BC3 Compressor in C#
+* mrtuffest - Yaz0moto ARt design

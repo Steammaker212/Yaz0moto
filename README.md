@@ -1,25 +1,18 @@
-<img alt="Yaz0moto" src="docs/banner.png" />
+<img alt="banner" src="https://github.com/user-attachments/assets/763f3aaa-f340-4f33-b853-546d213f2c3d" />
+<div align="center">
+    <img alt="switch" height="56" src="https://github.com/user-attachments/assets/f339e2a9-146c-42be-85f8-31a32af5999a">
+    <a href="https://discord.gg/RGcRsVkP8z">
+    <img alt="discord" height="56" src="https://github.com/user-attachments/assets/ce08f78a-d435-4dd5-9e4a-a47659f57b5b">
+</a>
+    <a href="https://zenith.nsmbu.net/wiki/Pyamoto_Level_Editor">
+        <img alt="docs" height="56" src="https://github.com/user-attachments/assets/425696ef-be66-42cd-9f3f-67dfbd36487d">
+    </a>
+</div>
 
 ## Overview
-Yaz0moto is a level editor for **New Super Mario Bros. U** (Wii U) and **New Super Mario Bros. U Deluxe** (Switch), with full tileset editing for both games.
+**Yaz0moto** is a dedicated fork of [Pyamoto](https://github.com/Zenith-Team/Pyamoto), specifically designed to prioritize, stabilize, and expand support for **New Super Mario Bros. U Deluxe** on the Nintendo Switch. 
 
-It is a fork of [Pyamoto](https://github.com/Zenith-Team/Pyamoto) by Zenith Team, which is itself a fork of [Miyamoto!](https://github.com/aboood40091/Miyamoto). Yaz0moto adds Deluxe support, using code from Miyamoto! DX. It is maintained by [Steammaker212](https://github.com/Steammaker212). See [CREDITS.md](./CREDITS.md) for everyone whose work this builds on.
-
-## Installation
-Download the latest build for your system from the [releases page](https://github.com/Steammaker212/Yaz0moto/releases/latest):
-
-| System | File |
-|---|---|
-| Windows (x64) | `Yaz0moto-v<version>-Windows-x64.zip` - unzip and run `Yaz0moto.exe` |
-| macOS (universal) | `Yaz0moto-v<version>-macOS-universal.zip` - unzip and open `Yaz0moto.app` |
-| Linux (x86_64) | `Yaz0moto-v<version>-Linux-x86_64.AppImage` (or the `.zip`) |
-
-The builds are not code-signed, so Windows SmartScreen or macOS Gatekeeper may warn you the first time; on macOS, right-click the app and choose *Open*. Yaz0moto checks this project's releases for updates (see Preferences).
-
-On first launch, the setup wizard helps you download the required data and point the editor at your game files. If you used Pyamoto before, your settings and data are copied across automatically (Pyamoto itself is left untouched).
-
-## Usage
-General editing works as in Pyamoto; the [NSMBU wiki](https://zenith.nsmbu.net/wiki/Miyamoto_Level_Editor) has a guide.
+While Pyamoto serves as the incredible upstream foundation for Wii U editing, Yaz0moto aims to be the definitive tool for Switch modders. We track upstream updates while maintaining the custom C-extensions and logic required to parse Deluxe's little-endian `.sarc` formats, `Unit` folder structure, and Yaz0 compression.
 
 ### New Super Mario Bros. U Deluxe
 Pick *New Super Mario Bros. U Deluxe* in the setup wizard (or **Preferences > Game Setup**) and select the `Course` folder from your dumped game's `romfs`. The `Unit` folder, where Deluxe keeps its tilesets, must sit right next to it. See [Deluxe-Setup.md](./Deluxe-Setup.md) for the full walkthrough.
@@ -37,10 +30,22 @@ Read the [changelog](./CHANGELOG.md) for a full list of changes and additions.
 ## Contributing
 Bug reports and feature requests go in the [Issues tab](https://github.com/Steammaker212/Yaz0moto/issues). Pull requests are welcome; see [Running from Source](#running-from-source) to set up a development environment. Maintainers: see [docs/RELEASING.md](./docs/RELEASING.md). `tests/deluxe_smoke_test.py` and `tests/branding_test.py` are quick checks to run before sending a change.
 
-## Running from Source
+## Features
+- **Deluxe First:** Native support for Switch `.sarc` levels and Deluxe background naming (`dv_Mori.Nin_NX_NVN.szs`).
+- **Crash Fixes:** Resolved the background save crash caused by out-of-range parallax values.
+- **Uncategorized Levels:** Properly displays and allows opening of the 101 unnamed levels in Deluxe.
+- **Windows Ready:** Includes an MSVC compatibility shim to compile the FastYZ C library natively on Windows.
 
-**Prerequisites:** [Python 3](https://www.python.org/downloads/) (Windows: check "Add Python to PATH" during install), Git, and a C compiler for the Cython extensions (Windows: Visual Studio Build Tools with the *Desktop development with C++* workload).
+## Installation & Setup (Windows)
+Before you begin, install the following prerequisites:
+- **[Git for Windows](https://git-scm.com/download/win)**
+- **[Python 3](https://www.python.org/downloads/)** — make sure “Add Python to PATH” is checked during installation.
+- **[Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/)** — select the **Desktop development with C++** workload.
 
+*After installing these tools, close and reopen PowerShell.*
+
+### Download Yaz0moto
+Open PowerShell and run:
 ```bash
 git clone --recurse-submodules https://github.com/Steammaker212/Yaz0moto
 cd Yaz0moto
@@ -52,11 +57,7 @@ bash setup_venv.sh
 # or on Windows:
 .venv\Scripts\python yaz0moto.py
 ```
-
-Windows users can follow [Deluxe-Setup.md](./Deluxe-Setup.md), which covers building the required extension step by step.
-
-## License
-Yaz0moto is free software under the GNU General Public License v3.0, like the projects it is based on. See [license.txt](./license.txt).
+For detailed step‑by‑step instructions, please see the **[Deluxe-Setup](./Deluxe-Setup.md)**.
 
 ### Disclaimer
 AI tools are used in the development of this program.
