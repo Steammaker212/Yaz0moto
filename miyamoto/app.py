@@ -26,6 +26,7 @@ from collections import Counter
 import json
 import os
 import platform
+import re
 import signal
 import struct
 import subprocess
@@ -2934,7 +2935,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 return False
 
         # Wii U and Deluxe areas aren't interchangeable (different byte order)
-        if (getattr(arc_, 'endianness', '>') == '<') != bool(globals.IsNSMBUDX):
+        isDeluxeLevel = self._isDeluxeLevelArchive(arc_)
+        if isDeluxeLevel is not None and isDeluxeLevel != bool(globals.IsNSMBUDX):
             QtWidgets.QMessageBox.warning(
                 self, 'Cannot Import Area',
                 'That level is from the %s version of the game, but the %s version is selected.' % (
@@ -3525,36 +3527,58 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         self.close()
 
-    def _levelMatchesGame(self, levelData):
+    @staticmethod
+    def _isDeluxeLevelArchive(arc):
         """
-        Wii U levels are big-endian SARCs and Deluxe levels are little-endian. Opening one
-        with the other game selected would misread (and then corrupt) it, so offer to
-        switch games instead. Returns False if the level should not be loaded.
+        Wii U course data is big-endian and Deluxe course data is little-endian. The SARC
+        wrapper can't tell them apart (retail Deluxe levels are big-endian SARCs), so look
+        at the first block offset of a courseN.bin, inside an inner SARC if there is one.
+        Returns True/False, or None if no course data was found.
         """
-        if not levelData or len(levelData) < 8 or levelData[:4] != b'SARC':
+        def walk(folder):
+            for item in folder.contents:
+                if isinstance(item, SarcLib.Folder):
+                    yield from walk(item)
+                else:
+                    yield item
+
+        inner = []
+        for f in walk(arc):
+            data = f.data
+            if re.fullmatch(r'course\d\.bin', f.name) and len(data) >= 4:
+                return struct.unpack_from('<I', data)[0] < struct.unpack_from('>I', data)[0]
+            if data[:4] == b'SARC':
+                inner.append(data)
+
+        for data in inner:
+            sub = SarcLib.SARC_Archive()
+            try:
+                sub.load(data)
+            except Exception:
+                continue
+            found = MiyamotoWindow._isDeluxeLevelArchive(sub)
+            if found is not None:
+                return found
+
+        return None
+
+    def _levelMatchesGame(self, arc):
+        """
+        Opening a Wii U level in Deluxe mode (or the other way around) would misread (and
+        then corrupt) it, so refuse and leave the editor as it was. Returns False if the
+        level should not be loaded.
+        """
+        isDeluxeLevel = self._isDeluxeLevelArchive(arc)
+        if isDeluxeLevel is None or isDeluxeLevel == bool(globals.IsNSMBUDX):
             return True
 
-        isDeluxeLevel = levelData[6:8] == b'\xff\xfe'
-        if isDeluxeLevel == bool(globals.IsNSMBUDX):
-            return True
+        wanted, current = ('Deluxe', 'Wii U') if isDeluxeLevel else ('Wii U', 'Deluxe')
 
-        wanted, current, target = (
-            ('Deluxe', 'Wii U', 'NSMBUDX') if isDeluxeLevel else ('Wii U', 'Deluxe', 'NSMBU'))
-
-        reply = QtWidgets.QMessageBox.question(
+        QtWidgets.QMessageBox.warning(
             self, 'Yaz0moto',
-            'This looks like a New Super Mario Bros. U %s level, but the %s version is selected.\n\n'
-            'Switch to the %s version? (Active mods will be turned off.)' % (wanted, current, wanted),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-
-        if reply != QtWidgets.QMessageBox.Yes:
-            return False
-
-        # (Unsaved changes were already confirmed by whoever asked to open this level.)
-        from . import loading as _loading
-        _loading.LoadGameDef(target, [], dlg=True)
-        self.updateOpenByNameState()
-        return True
+            'This is a %s level, but Yaz0moto is in %s mode.\n\n'
+            'Switch to %s mode (on the welcome screen or in Preferences) before opening this level.' % (wanted, current, wanted))
+        return False
 
     @staticmethod
     def _usesOuterSarc():
@@ -4141,12 +4165,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                                                   else 'Cannot find the required level file [file].szs. Check your "course_res_pack" folder and make sure it exists.').replace('[file]', str(name)))
                     return False
 
-                # Set the filepath variables
-                self.fileSavePath = name
-                self.fileTitle = os.path.basename(self.fileSavePath)
-
                 # Open the file
-                with open(self.fileSavePath, 'rb') as fileobj:
+                with open(name, 'rb') as fileobj:
                     levelData = fileobj.read()
 
                 # Decompress, if needed (Yaz0)
@@ -4161,11 +4181,16 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 else:
                     return False  # keep it from crashing by loading things it shouldn't
 
-                if not self._levelMatchesGame(levelData):
-                    return False
-
                 arc = SarcLib.SARC_Archive()
                 arc.load(levelData)
+
+                # Refuse before touching anything, so the open level is left as it was
+                if not self._levelMatchesGame(arc):
+                    return False
+
+                # Set the filepath variables
+                self.fileSavePath = name
+                self.fileTitle = os.path.basename(self.fileSavePath)
 
                 def exists(fn):
                     nonlocal arc
@@ -6235,8 +6260,9 @@ def _migrate_dx_settings():
     """
     Settings carried over from Miyamoto! DX (flagged "isDX") describe a New Super Mario
     Bros. U Deluxe setup: move its game path into the Deluxe game slot and select Deluxe.
+    "isDX" itself stays: it's the "Use Deluxe" setting.
     """
-    if not setting('isDX'):
+    if not setting('isDX') or setting('DXSettingsMigrated', False):
         return
 
     legacy = setting('GamePath')
@@ -6252,7 +6278,7 @@ def _migrate_dx_settings():
     if not setting('SetupComplete', False) and isValidGamePath(setting('GamePath_NSMBUDX', ''), 'NSMBUDX'):
         setSetting('SetupComplete', True)
 
-    setSetting('isDX', False)
+    setSetting('DXSettingsMigrated', True)
     globals.settings.sync()
 
 
@@ -6363,7 +6389,8 @@ def main():
 
     # First-run defaults
     if setting("MiyamotoVersion") is None:
-        setSetting("isDX", False)
+        if setting("isDX") is None:
+            setSetting("isDX", False)
         setSetting("MiyamotoVersion", globals.MiyamotoVersion)
         setSetting('uiStyle', "Fusion")
         globals.settings.sync()
@@ -6409,7 +6436,11 @@ def main():
     # Load required stuff
     globals.Sprites = None
     globals.SpriteListData = None
+    # "Use Deluxe" (isDX) picks between the Deluxe and Wii U base games
     _base = setting('LastBaseGame', 'NSMBU')
+    if setting('isDX') is not None:
+        _base = ResolveBaseGameForDeluxe(setting('isDX'), _base)
+        setSetting('LastBaseGame', _base)
     _mods = setting('LastMods') or []
     if isinstance(_mods, str):
         _mods = [_mods]

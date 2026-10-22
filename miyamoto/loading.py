@@ -22,7 +22,7 @@ from xml.etree import ElementTree as etree
 from . import globals
 from . import spritelib as SLib
 from . import yaz0
-from .gamedefs import MiyamotoGameDefinition
+from .gamedefs import MiyamotoGameDefinition, IsBaseGameDX
 from .misc import SpriteDefinition, BGName, setting, setSetting
 import SarcLib
 
@@ -720,6 +720,21 @@ def ApplyGamePlatform(gamedef):
     isDX = bool(getattr(gamedef, 'isDX', False))
     globals.IsNSMBUDX = isDX
     globals.FileExtentions = globals.FileExtensions_NSMBUDX if isDX else globals.FileExtensions_NSMBU
+
+    # Keep the "Use Deluxe" setting in settings.json in step with the loaded game
+    if globals.settings is not None and setting('isDX') != isDX:
+        setSetting('isDX', isDX)
+
+
+def ResolveBaseGameForDeluxe(useDX, base_game=None):
+    """
+    Returns the base game to load for the "Use Deluxe" choice: a Deluxe game when it's
+    on, a Wii U one when it's off. A base game that already matches is kept.
+    """
+    base_game = base_game or setting('LastBaseGame', 'NSMBU')
+    if IsBaseGameDX(base_game) == bool(useDX):
+        return base_game
+    return 'NSMBUDX' if useDX else 'NSMBU'
 
 
 def LoadGameDef(base_game=None, mods=None, dlg=None):

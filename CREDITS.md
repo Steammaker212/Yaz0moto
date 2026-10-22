@@ -1,6 +1,7 @@
 ## Yaz0moto Credits
 ### Yaz0moto
 * Steammaker212 - Maintainer; Deluxe (Switch) support, tileset editor for Deluxe, branding and releases
+* jabonchan - Contributor;
 
 Yaz0moto is a fork of Pyamoto, which is a fork of Miyamoto!. Everything below credits the work it builds on and remains in force.
 

@@ -3743,6 +3743,54 @@ class PreferencesDialog(QtWidgets.QDialog):
         return ResourcesTab()
 
 
+class ClickableLabel(QtWidgets.QLabel):
+    """A label that emits clicked() when pressed."""
+    clicked = pyqtSignal()
+
+    def __init__(self, text):
+        super().__init__(text)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ModeSwitch(QtWidgets.QAbstractButton):
+    """A sliding on/off toggle switch, drawn with the palette's colors."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(44, 22)
+
+    def sizeHint(self):
+        return QtCore.QSize(44, 22)
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        pal = self.palette()
+        r = self.rect().adjusted(1, 1, -1, -1)
+        radius = r.height() / 2
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(pal.color(QtGui.QPalette.Highlight) if self.isChecked() else pal.color(QtGui.QPalette.Mid))
+        p.drawRoundedRect(QtCore.QRectF(r), radius, radius)
+
+        knob = r.height() - 4
+        x = r.right() - knob - 2 if self.isChecked() else r.left() + 2
+        p.setBrush(QtGui.QColor(255, 255, 255))
+        p.drawEllipse(QtCore.QRectF(x, r.top() + 2, knob, knob))
+
+        if self.hasFocus():
+            p.setPen(QtGui.QPen(pal.color(QtGui.QPalette.Highlight), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius + 1, radius + 1)
+
+
 class WelcomeDialog(QtWidgets.QDialog):
     """
     Shown at startup when no level can be auto-loaded.
@@ -3800,10 +3848,31 @@ class WelcomeDialog(QtWidgets.QDialog):
         sub.setAlignment(Qt.AlignHCenter)
         sub.setStyleSheet('color: palette(mid);')
         layout.addWidget(sub)
-        layout.addSpacing(22)
+        layout.addSpacing(14)
+
+        # Wii U / Deluxe mode switch (off = Wii U, on = Deluxe)
+        modeRow = QtWidgets.QHBoxLayout()
+        modeRow.setSpacing(10)
+        modeRow.addStretch(1)
+        self._modeSwitch = ModeSwitch()
+        self._modeSwitch.setChecked(bool(globals.IsNSMBUDX))
+        self._wiiuLabel = ClickableLabel('Wii U')
+        self._wiiuLabel.setToolTip('Edit New Super Mario Bros. U (Wii U) levels.')
+        self._wiiuLabel.clicked.connect(lambda: self._modeSwitch.setChecked(False))
+        self._deluxeLabel = ClickableLabel('Deluxe')
+        self._deluxeLabel.setToolTip('Edit New Super Mario Bros. U Deluxe (Switch) levels.')
+        self._deluxeLabel.clicked.connect(lambda: self._modeSwitch.setChecked(True))
+        modeRow.addWidget(self._wiiuLabel)
+        modeRow.addWidget(self._modeSwitch)
+        modeRow.addWidget(self._deluxeLabel)
+        modeRow.addStretch(1)
+        self._updateModeLabels()
+        self._modeSwitch.toggled.connect(self._toggleDeluxe)
+        layout.addLayout(modeRow)
+        layout.addSpacing(14)
 
         # Action buttons
-        _has_name_sources = hasLevelNameSources()
+        self._openNameBtn = None
         for label, action in (
             ('New Level',           self.ACTION_NEW_LEVEL),
             ('Open Level by Name…', self.ACTION_OPEN_NAME),
@@ -3812,11 +3881,11 @@ class WelcomeDialog(QtWidgets.QDialog):
             btn = QtWidgets.QPushButton(label)
             btn.setFixedHeight(36)
             btn.clicked.connect(lambda _checked, a=action: self._choose(a))
-            if action == self.ACTION_OPEN_NAME and not _has_name_sources:
-                btn.setEnabled(False)
-                btn.setToolTip('No game path configured. Set one in Interactive Setup first.')
+            if action == self.ACTION_OPEN_NAME:
+                self._openNameBtn = btn
             layout.addWidget(btn)
             layout.addSpacing(6)
+        self._updateOpenNameBtn()
 
         # Recent files section
         recent_entries = globals.mainWindow.RecentMenu.getEntries() if globals.mainWindow else []
@@ -3874,6 +3943,40 @@ class WelcomeDialog(QtWidgets.QDialog):
     def _choose(self, action):
         self.action = action
         self.accept()
+
+    def _updateOpenNameBtn(self):
+        has_sources = hasLevelNameSources()
+        self._openNameBtn.setEnabled(has_sources)
+        self._openNameBtn.setToolTip('' if has_sources else 'No game path configured. Set one in Interactive Setup first.')
+
+    def _updateModeLabels(self):
+        """Bolds the label of the active mode and dims the other one."""
+        isDX = self._modeSwitch.isChecked()
+        for label, active in ((self._wiiuLabel, not isDX), (self._deluxeLabel, isDX)):
+            f = label.font()
+            f.setBold(active)
+            label.setFont(f)
+            label.setStyleSheet('' if active else 'color: palette(mid);')
+
+    def _toggleDeluxe(self, isDX):
+        """Switches between the Deluxe and Wii U base games, keeping the active mods."""
+        self._updateModeLabels()
+        from . import loading
+        mods = setting('LastMods') or []
+        if isinstance(mods, str):
+            mods = [mods]
+        base = loading.ResolveBaseGameForDeluxe(isDX)
+        setSetting('isDX', bool(isDX))
+
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            loading.LoadGameDef(base, mods, dlg=True)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        if globals.mainWindow:
+            globals.mainWindow.updateOpenByNameState()
+        self._updateOpenNameBtn()
 
     def _openRecent(self, item):
         path = item.data(Qt.UserRole)
