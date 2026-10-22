@@ -4814,6 +4814,39 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
             hints |= QtGui.QPainter.SmoothPixmapTransform
         self.setRenderHints(hints)
 
+    def showZoneMenu(self, event):
+        """
+        Ctrl + right click on a zone: background preview options.
+        Returns False if there's no zone under the cursor.
+        """
+        pos = self.mapToScene(event.pos())
+        mult = globals.TileWidth / 16
+        zones = [z for z in getattr(globals.Area, 'zones', ())
+                 if QtCore.QRectF(z.objx * mult, z.objy * mult, z.width * mult, z.height * mult).contains(pos)]
+        if not zones:
+            return False
+
+        # The smallest zone is the one most likely meant when they overlap
+        zone = min(zones, key=lambda z: z.width * z.height)
+        mw = globals.mainWindow
+
+        menu = QtWidgets.QMenu(self)
+        menu.addSection(zone.title)
+        render = menu.addAction('Render Background Preview')
+        render.setEnabled(globals.IsNSMBUDX)
+        if not globals.IsNSMBUDX:
+            render.setToolTip('Only available for New Super Mario Bros. U Deluxe')
+        clear = menu.addAction('Clear Background Preview')
+        clear.setEnabled(zone.bgPreview is not None)
+
+        chosen = menu.exec_(event.globalPos())
+        if chosen is render:
+            mw.RenderZoneBackground(zone)
+        elif chosen is clear:
+            mw.ClearZoneBackground(zone)
+
+        return True
+
     def mousePressEvent(self, event):
         """
         Overrides mouse pressing events if needed
@@ -4839,6 +4872,11 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
         if eventButton == Qt.MidButton:
             self.__prevMousePos = event.pos()
+            event.accept()
+
+        elif (eventButton == Qt.RightButton
+              and QtWidgets.QApplication.keyboardModifiers() == Qt.ControlModifier
+              and self.showZoneMenu(event)):
             event.accept()
 
         elif eventButton == Qt.RightButton:
@@ -5913,7 +5951,11 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
                         
                     if len(moved_items) + len(resized_items) > 1:
                         globals.UndoManager.end_compound()
-                
+
+                    # A zone moved or resized: its background moves with it
+                    if any(isinstance(item, ZoneItem) for item, _, _ in moved_items + resized_items):
+                        globals.mainWindow.QueueLiveBackground()
+
                 self.drag_snapshot = {}
 
         QtWidgets.QGraphicsView.mouseReleaseEvent(self, event)

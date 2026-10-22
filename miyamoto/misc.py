@@ -37,6 +37,9 @@ class LevelScene(QtWidgets.QGraphicsScene):
         super().__init__(*args)
         self.setBackgroundBrush(QtGui.QBrush(globals.theme.color('bg')))
 
+        # (scene rect of the view it was rendered for, [QPixmap per zone]) or None
+        self.liveBackground = None
+
     def drawForeground(self, painter, rect):
         """
         Draw a foreground grid (only called when taking a screenshot)
@@ -50,6 +53,25 @@ class LevelScene(QtWidgets.QGraphicsScene):
         super().drawBackground(painter, rect)
         if not hasattr(globals.Area, 'layers'):
             return
+
+        # The live background: images of the whole view, transparent outside their zones
+        if globals.LiveBackgroundEnabled and self.liveBackground is not None:
+            viewRect, pixmaps = self.liveBackground
+            if viewRect.intersects(rect):
+                for pixmap in pixmaps:
+                    painter.drawPixmap(viewRect, pixmap, QtCore.QRectF(pixmap.rect()))
+
+        # Rendered background previews, stretched over their zones (the live background
+        # replaces them while it's on)
+        mult = globals.TileWidth / 16
+        for zone in () if globals.LiveBackgroundEnabled else getattr(globals.Area, 'zones', ()):
+            preview = getattr(zone, 'bgPreview', None)
+            if preview is None:
+                continue
+
+            target = QtCore.QRectF(zone.objx * mult, zone.objy * mult, zone.width * mult, zone.height * mult)
+            if target.intersects(rect):
+                painter.drawPixmap(target, preview, QtCore.QRectF(preview.rect()))
 
         drawrect = QtCore.QRectF(rect.x() / globals.TileWidth, rect.y() / globals.TileWidth, rect.width() / globals.TileWidth + 1,
                                  rect.height() / globals.TileWidth + 1)

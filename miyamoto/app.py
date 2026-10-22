@@ -87,6 +87,8 @@ else:
 from .area import *
 from .bytes import *
 from .dialogs import *
+from . import dvrender
+from . import dvgl
 #from firstRunWizard import Wizard <- is executed later
 from .gamedefs import *
 from .items import *
@@ -256,6 +258,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.view.XScrollBar.valueChanged.connect(self.XScrollChange)
         self.view.YScrollBar.valueChanged.connect(self.YScrollChange)
         self.view.FrameSize.connect(self.HandleWindowSizeChange)
+        self.view.XScrollBar.valueChanged.connect(self.QueueLiveBackground)
+        self.view.YScrollBar.valueChanged.connect(self.QueueLiveBackground)
+        self.view.FrameSize.connect(self.QueueLiveBackground)
 
         # done creating the window!
         self.setCentralWidget(self.view)
@@ -687,6 +692,18 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             'Show special effects present in the level',
             QtGui.QKeySequence('Ctrl+9'), True,
         )
+        self.CreateAction(
+            'livebg', self.HandleLiveBackgroundToggle, None,
+            'Live Background (Deluxe)',
+            'Show each zone\'s background model behind the view, as the game would with the screen there',
+            None, True,
+        )
+        self.CreateAction(
+            'livebganim', self.HandleLiveBackgroundAnimToggle, None,
+            'Animate Live Background',
+            'Play the background models\' animations (needs OpenGL)',
+            None, True,
+        )
 
         self.CreateAction(
             'showsprites', self.HandleSpritesVisibility, GetIcon('sprites'),
@@ -847,6 +864,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         self.actions['collisions'].setChecked(globals.CollisionsShown)
         self.actions['realview'].setChecked(globals.RealViewEnabled)
+        self.actions['livebg'].setChecked(globals.LiveBackgroundEnabled)
+        self.actions['livebganim'].setChecked(globals.LiveBackgroundAnimated)
 
         self.actions['showsprites'].setChecked(globals.SpritesShown)
         self.actions['showspriteimages'].setChecked(globals.SpriteImagesShown)
@@ -925,6 +944,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         vmenu.addAction(self.actions['tileanim'])
         vmenu.addAction(self.actions['collisions'])
         vmenu.addAction(self.actions['realview'])
+        vmenu.addAction(self.actions['livebg'])
+        vmenu.addAction(self.actions['livebganim'])
         vmenu.addSeparator()
         vmenu.addAction(self.actions['showsprites'])
         vmenu.addAction(self.actions['showspriteimages'])
@@ -4001,6 +4022,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             z.UpdateRects()
 
         self.scene.update()
+        self.QueueLiveBackground()
 
     def HandleOverviewClick(self, x, y):
         """
@@ -4428,6 +4450,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         if name is not None:
             # Add the path to Recent Files
             self.RecentMenu.AddToList(self.fileSavePath)
+
+        # The previous level's live background no longer applies
+        self.scene.liveBackground = None
+        self.QueueLiveBackground()
 
         # If we got this far, everything worked! Return True.
         return True
@@ -6087,6 +6113,247 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     spr.ImageObj.positionChanged()
 
         self.levelOverview.update()
+        self.QueueLiveBackground()
+
+    def RenderZoneBackground(self, zone):
+        """
+        Renders a preview of the zone's background model and shows it behind the zone (Deluxe only)
+        """
+        name = bytes_to_string(zone.background[4])
+        path = globals.gamedef.FindDistantViewFile(name) if globals.IsNSMBUDX else None
+        if path is None:
+            QtWidgets.QMessageBox.warning(self, 'Background Preview',
+                'Could not find the background model "%s" in the game\'s Model folder.' % BGTab.fileNameFor(name))
+            return
+
+        threads = getattr(self, '_dvRenderThreads', None)
+        if threads is None:
+            threads = self._dvRenderThreads = set()
+
+        thread = dvrender.DistantViewRenderThread(zone, path, self)
+        thread.progress.connect(self._zoneBackgroundProgress)
+        thread.rendered.connect(self._zoneBackgroundRendered)
+        thread.failed.connect(self._zoneBackgroundFailed)
+        thread.finished.connect(lambda: threads.discard(thread))
+        threads.add(thread)
+
+        self.statusBar().showMessage('Loading background "%s" for %s...' % (name, zone.title))
+        thread.start()
+
+    def ClearZoneBackground(self, zone):
+        """
+        Removes a zone's background preview
+        """
+        zone.bgPreview = None
+        self.scene.update()
+
+    def _zoneBackgroundProgress(self, zone, percent):
+        self.statusBar().showMessage('Rendering background for %s... %d%%' % (zone.title, percent))
+
+    def _zoneBackgroundRendered(self, zone, image):
+        zone.bgPreview = QtGui.QPixmap.fromImage(image)
+        self.statusBar().showMessage('Rendered background for %s' % zone.title, 3000)
+        self.scene.update()
+
+    def _zoneBackgroundFailed(self, zone, message):
+        self.statusBar().clearMessage()
+        QtWidgets.QMessageBox.warning(self, 'Background Preview',
+            'Could not render the background for %s:\n%s' % (zone.title, message))
+
+    def HandleLiveBackgroundToggle(self, checked):
+        """
+        Handle toggling of the live background
+        """
+        globals.LiveBackgroundEnabled = checked
+        setSetting('LiveBackground', checked)
+
+        if checked:
+            self.QueueLiveBackground()
+        else:
+            self._setLiveBackgroundAnimating(False)
+            self.scene.liveBackground = None
+            self.scene.update()
+
+    def HandleLiveBackgroundAnimToggle(self, checked):
+        """
+        Handle toggling of the live background's animations
+        """
+        globals.LiveBackgroundAnimated = checked
+        setSetting('LiveBackgroundAnimated', checked)
+        if not checked:
+            self._setLiveBackgroundAnimating(False)
+        self.QueueLiveBackground()
+
+    def _setLiveBackgroundAnimating(self, on):
+        """
+        Starts or stops re-rendering the live background over time (about 20 times a
+        second), for backgrounds with animations
+        """
+        timer = getattr(self, '_liveBgAnimTimer', None)
+        if not on:
+            if timer is not None:
+                timer.stop()
+            return
+
+        if timer is None:
+            timer = self._liveBgAnimTimer = QtCore.QTimer(self)
+            timer.setInterval(50)
+            timer.timeout.connect(self._renderLiveBackground)
+        if not timer.isActive():
+            timer.start()
+
+    def _liveBackgroundFrame(self):
+        """
+        The current animation frame: the game runs animations at 60 frames per second
+        """
+        start = getattr(self, '_liveBgStart', None)
+        if start is None:
+            start = self._liveBgStart = time.monotonic()
+        return (time.monotonic() - start) * 60
+
+    def QueueLiveBackground(self, *args):
+        """
+        Renders the live background shortly after the view stops changing
+        """
+        if not globals.LiveBackgroundEnabled:
+            return
+
+        timer = getattr(self, '_liveBgTimer', None)
+        if timer is None:
+            timer = self._liveBgTimer = QtCore.QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._renderLiveBackground)
+
+        # With OpenGL a render takes milliseconds, so follow the view right away (the
+        # timer only merges changes made together, like a zoom moving both scroll bars).
+        # Without it, wait until the view stops changing.
+        timer.setInterval(0 if self._glBackgroundRenderer() is not None else 300)
+        timer.start()
+
+    def _glBackgroundRenderer(self):
+        """
+        The OpenGL background renderer, or None if OpenGL isn't available
+        """
+        renderer = getattr(self, '_glBg', False)
+        if renderer is False:
+            renderer = dvgl.GLBackgroundRenderer()
+            if not renderer.ok:
+                print('Live background: OpenGL is not available, using the slower renderer')
+                renderer = None
+            self._glBg = renderer
+
+        return renderer
+
+    def _loadGLBackground(self, path):
+        """
+        Loads a background model for the OpenGL renderer off the GUI thread, then
+        uploads it and re-renders
+        """
+        loading = self.__dict__.setdefault('_glBgLoading', {})
+        failed = self.__dict__.setdefault('_glBgFailed', set())
+        if path in loading or path in failed:
+            return
+
+        def done(path, data):
+            self._glBackgroundRenderer().upload(path, *data)
+            self.statusBar().clearMessage()
+            self.QueueLiveBackground()
+
+        def error(path, message):
+            failed.add(path)
+            self.statusBar().showMessage('Live background failed: ' + message, 5000)
+
+        thread = dvgl.GLModelLoadThread(path, self)
+        thread.loaded.connect(done)
+        thread.failed.connect(error)
+        thread.finished.connect(lambda: loading.pop(path, None))
+        loading[path] = thread
+
+        self.statusBar().showMessage('Loading background %s...' % os.path.basename(path))
+        thread.start()
+
+    def _renderLiveBackground(self):
+        """
+        Starts rendering the background of every Deluxe zone in view, as the game shows
+        it with the screen at the middle of the view
+        """
+        if not globals.LiveBackgroundEnabled or not hasattr(globals.Area, 'zones'):
+            return
+
+        # One render at a time; the latest request runs when the current one is done
+        thread = getattr(self, '_liveBgThread', None)
+        if thread is not None and thread.isRunning():
+            self._liveBgPending = True
+            return
+        self._liveBgPending = False
+
+        viewport = self.view.viewport()
+        sceneRect = self.view.mapToScene(viewport.rect()).boundingRect()
+        toLevel = 16 / globals.TileWidth
+        viewRect = (sceneRect.x() * toLevel, sceneRect.y() * toLevel,
+                    sceneRect.width() * toLevel, sceneRect.height() * toLevel)
+
+        jobs = []
+        if globals.IsNSMBUDX:
+            viewX, viewY, viewW, viewH = viewRect
+            for zone in globals.Area.zones:
+                if (zone.objx >= viewX + viewW or zone.objx + zone.width <= viewX
+                        or zone.objy >= viewY + viewH or zone.objy + zone.height <= viewY):
+                    continue
+
+                path = globals.gamedef.FindDistantViewFile(bytes_to_string(zone.background[4]))
+                if path is not None:
+                    jobs.append((path, (zone.objx, zone.objy, zone.width, zone.height),
+                                 zone.cammode, zone.camzoom))
+
+        if not jobs:
+            self._setLiveBackgroundAnimating(False)
+            self.scene.liveBackground = None
+            self.scene.update()
+            return
+
+        renderer = self._glBackgroundRenderer()
+        if renderer is not None:
+            for path, _, _, _ in jobs:
+                if not renderer.has(path):
+                    self._loadGLBackground(path)
+
+            ready = [job for job in jobs if renderer.has(job[0])]
+            if ready:
+                image = renderer.render(ready, viewRect, max(1, viewport.width()), max(1, viewport.height()),
+                                        self._liveBackgroundFrame())
+                self.scene.liveBackground = (sceneRect, [QtGui.QPixmap.fromImage(image)])
+            else:
+                self.scene.liveBackground = None
+            self.scene.update(sceneRect)
+
+            self._setLiveBackgroundAnimating(
+                globals.LiveBackgroundAnimated and any(renderer.isAnimated(job[0]) for job in ready))
+            return
+
+        # Rendering a full-size view in Python is slow; render smaller and stretch
+        reduce = min(1.0, 960 / max(viewport.width(), 1))
+        width = max(1, round(viewport.width() * reduce))
+        height = max(1, round(viewport.height() * reduce))
+
+        thread = self._liveBgThread = dvrender.LiveViewRenderThread(jobs, viewRect, width, height, self)
+        thread.status.connect(lambda text: self.statusBar().showMessage(text))
+        thread.rendered.connect(lambda images: self._liveBackgroundRendered(sceneRect, images))
+        thread.failed.connect(lambda text: self.statusBar().showMessage('Live background failed: ' + text, 5000))
+        thread.finished.connect(self._liveBackgroundFinished)
+        thread.start()
+
+    def _liveBackgroundRendered(self, sceneRect, images):
+        if not globals.LiveBackgroundEnabled:
+            return
+
+        self.scene.liveBackground = (sceneRect, [QtGui.QPixmap.fromImage(image) for image in images])
+        self.statusBar().clearMessage()
+        self.scene.update()
+
+    def _liveBackgroundFinished(self):
+        if getattr(self, '_liveBgPending', False):
+            self._renderLiveBackground()
 
     def HandleScreenshot(self):
         """
@@ -6485,6 +6752,8 @@ def main():
     globals.SpriteListPreviewHighDetail = setting('SpriteListPreviewHighDetail', False)
     globals.UseRGBA8 = setting('UseRGBA8', False)
     globals.RealViewEnabled = setting('RealViewEnabled', True)
+    globals.LiveBackgroundEnabled = setting('LiveBackground', False)
+    globals.LiveBackgroundAnimated = setting('LiveBackgroundAnimated', True)
     globals.SpritesShown = setting('ShowSprites', True)
     globals.SpriteImagesShown = setting('ShowSpriteImages', True)
     globals.LocationsShown = setting('ShowLocations', True)

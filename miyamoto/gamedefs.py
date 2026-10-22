@@ -254,6 +254,22 @@ class MiyamotoGameDefinition:
 
         return None
 
+    def FindDistantViewFile(self, name):
+        """
+        Deluxe only: path of the background model "dv_<name>.Nin_NX_NVN.szs" in the most
+        specific "Model" folder (next to a game/mod "Course" folder) that has it, or None.
+        """
+        filename = 'dv_%s.Nin_NX_NVN.szs' % name
+        for path in reversed(self.GetGamePaths()):
+            if not path:
+                continue
+
+            candidate = os.path.join(os.path.dirname(os.path.normpath(path)), 'Model', filename)
+            if os.path.isfile(candidate):
+                return candidate
+
+        return None
+
     def GetLastLevel(self):
         """
         Returns the last loaded level

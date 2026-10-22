@@ -1,6 +1,7 @@
 
 __pycache__/
 miyamoto/__pycache__/
+ignore/
 .idea/
 build/
 dist/

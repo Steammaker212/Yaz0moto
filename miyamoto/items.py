@@ -965,6 +965,8 @@ class ZoneItem(LevelEditorItem):
         # Extension: custom track name used when music == 0
         # (course{N}.{Y}.music.txt, Y = this zone's index)
         self.customMusicName = ''
+        # Rendered preview of the background model (QPixmap), drawn behind the zone
+        self.bgPreview = None
         #self.block6id = s
         self.type = t
         self.UpdateRects()
