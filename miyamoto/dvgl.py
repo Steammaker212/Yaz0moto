@@ -467,7 +467,12 @@ class GLBackgroundRenderer:
         try:
             profile = QtGui.QOpenGLVersionProfile()
             profile.setVersion(2, 0)
-            self.gl = self.context.versionFunctions(profile)
+            try:
+                self.gl = self.context.versionFunctions(profile)
+            except ImportError:
+                # PyQt5 imports the wrappers (PyQt5._QOpenGLFunctions_2_0) by name; a
+                # frozen build without them falls back to the slower renderer
+                return
             if self.gl is None:
                 return
             self.gl.initializeOpenGLFunctions()
