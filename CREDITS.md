@@ -15,7 +15,7 @@ Credits inherited from Pyamoto:
 * RoadrunnerWMC - Creator of Reggie! Next
 * Grop, Hiccup, Kinnay, MrRean and RoadrunnerWMC - Reggie! Next NSMBU
   
-### Miyamoto
+### Miyamoto & Miyamoto-Next
 * AboodXD - Lead Coder, Icons & Graphics, Sprite Images & Coding
 * Gota7 - Founder, Icons
 * mrbengtsson - Sprite Images & Coding
