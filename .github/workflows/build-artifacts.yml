@@ -105,41 +105,39 @@ jobs:
             "import os, PyQt5; print(os.path.dirname(os.path.dirname(PyQt5.__file__)))")
           python buildtools/merge_pyqt5.py build/Yaz0moto.app "$PYQT5_PARENT"
 
-      - name: Pre-package cleanup (flatten broken symlinks)
+      # bdist_mac keeps everything but the executable in Contents/Resources, with
+      # relative symlinks to its folders in Contents/MacOS. That layout must stay:
+      # files in Contents/MacOS count as code, and codesign stores the signature of
+      # a non-code file there (XML, images...) in extended attributes, which zip
+      # drops, so the downloaded app would no longer be signed.
+      - name: Remove hidden folders from the bundle
         run: |
           python - <<'EOF'
-          import sys, os, os.path, shutil
-          print('>> Performing macOS specific prepacking...')
-          app_path = 'build/Yaz0moto.app'
-          if os.path.isdir(app_path):
-              macos_dir = os.path.join(app_path, 'Contents/MacOS')
-              res_dir = os.path.join(app_path, 'Contents/Resources')
-              if os.path.isdir(res_dir):
-                for name in os.listdir(res_dir):
-                    res_item = os.path.join(res_dir, name)
-                    macos_item = os.path.join(macos_dir, name)
-                    if os.path.isdir(res_item) and not os.path.islink(res_item):
-                        if os.path.islink(macos_item):
-                            os.unlink(macos_item)
-                            shutil.move(res_item, macos_item)
-                            print(f'>> Fixed symlink to physical folder and transferred: {name}')
-              # codesign --deep takes any folder with a dot in its name for a nested
-              # bundle and refuses to sign it (e.g. the example patch's .github folder).
-              # The app never reads these, so drop them from the bundle. Only our own data
-              # folders are cleaned: libraries can keep real code in hidden folders (.dylibs).
-              for data_dir in ('yaz0data', 'yaz0extras'):
-                  for root, dirs, files in os.walk(os.path.join(macos_dir, data_dir)):
-                      for d in [d for d in dirs if d.startswith('.')]:
-                          shutil.rmtree(os.path.join(root, d))
-                          print(f'>> Removed hidden folder: {os.path.join(root, d)}')
-                          dirs.remove(d)
-          print("\nPre-package script successful.")
+          import os, shutil
+          res_dir = 'build/Yaz0moto.app/Contents/Resources'
+          # The app never reads these (e.g. the example patch's .github folder). Only our
+          # own data folders are cleaned: libraries can keep real code in hidden folders (.dylibs).
+          for data_dir in ('yaz0data', 'yaz0extras'):
+              for root, dirs, files in os.walk(os.path.join(res_dir, data_dir)):
+                  for d in [d for d in dirs if d.startswith('.')]:
+                      shutil.rmtree(os.path.join(root, d))
+                      print(f'>> Removed hidden folder: {os.path.join(root, d)}')
+                      dirs.remove(d)
           EOF
 
       # Signing must be the last change to the bundle: anything moved inside it
       # afterwards breaks the signature, and macOS then calls the app damaged.
       - name: Ad-hoc sign bundle
         run: |
+          # Libraries and helpers live in Contents/Resources, where codesign --deep doesn't
+          # sign them, and the build changed them (install names, merged architectures).
+          # macOS won't load a library whose signature is broken, so sign each one first.
+          find build/Yaz0moto.app/Contents/Resources -type f -print0 |
+            while IFS= read -r -d '' f; do
+              if file -b "$f" | grep -q 'Mach-O'; then
+                codesign --force --sign - "$f"
+              fi
+            done
           codesign --force --deep --sign - build/Yaz0moto.app
           codesign --verify --deep --strict --verbose=2 build/Yaz0moto.app
 
@@ -161,6 +159,22 @@ jobs:
           echo "$INFO" | grep -q x86_64
           echo "$INFO" | grep -q arm64
           echo "Symlinks kept in the bundle: $(find "$CHECK/Yaz0moto.app" -type l | wc -l)"
+
+          # It must also start: macOS kills it at launch if a library's signature is
+          # broken, and a missing module stops it too. A fresh HOME gives it no settings,
+          # so it opens the first-run setup and waits there.
+          export HOME="$(mktemp -d)"
+          "$CHECK/Yaz0moto.app/Contents/MacOS/Yaz0moto" > launch.log 2>&1 &
+          PID=$!
+          sleep 20
+          if ! kill -0 "$PID" 2>/dev/null; then
+            CODE=0; wait "$PID" || CODE=$?
+            cat launch.log
+            echo "::error::The app quit at launch (exit code $CODE)"
+            exit 1
+          fi
+          kill "$PID"
+          echo "The app started and was still running after 20 seconds."
 
       - uses: actions/upload-artifact@v4
         with:
