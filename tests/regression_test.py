@@ -32,13 +32,13 @@ except ImportError:
 from PyQt5 import QtGui, QtWidgets
 app = QtWidgets.QApplication([])
 
-from miyamoto import globals
+from yaz0moto import globals
 globals.mainWindow = mock.MagicMock()
 globals.NumberFont = QtGui.QFont()
 
-from miyamoto import area as A, updater, yaz0
-from miyamoto.misc import Metadata, encodeMetadataText, decodeMetadataText
-from miyamoto.verifications import IsNSMBLevel
+from yaz0moto import area as A, updater, yaz0
+from yaz0moto.misc import Metadata, encodeMetadataText, decodeMetadataText
+from yaz0moto.verifications import IsNSMBLevel
 
 results = []
 
@@ -186,9 +186,9 @@ else:
 # ---------------------------------------------------------------- the Yaz0moto theme
 
 import re
-from miyamoto.misc import JsonSettings, setSetting, setting
-from miyamoto import loading
-from miyamoto.ui import SetAppStyle, GetIcon
+from yaz0moto.misc import JsonSettings, setSetting, setting
+from yaz0moto import loading
+from yaz0moto.ui import SetAppStyle, GetIcon
 
 globals.app = app
 globals.user_data_path = tempfile.mkdtemp()
@@ -199,10 +199,10 @@ theme = globals.theme
 check('the Yaz0moto theme is the default', theme.themeName == 'Yaz0moto')
 
 used = set()
-for name in os.listdir(os.path.join(ROOT, 'miyamoto')):
+for name in os.listdir(os.path.join(ROOT, 'yaz0moto')):
     if name.endswith('.py'):
-        used.update(re.findall(r"GetIcon\(['\"]([a-z0-9_]+)['\"]", open(os.path.join(ROOT, 'miyamoto', name), encoding='utf-8').read()))
-svgs = {f[5:-4] for f in os.listdir(os.path.join(ROOT, 'miyamotodata', 'themes', 'Yaz0moto', 'icons'))}
+        used.update(re.findall(r"GetIcon\(['\"]([a-z0-9_]+)['\"]", open(os.path.join(ROOT, 'yaz0moto', name), encoding='utf-8').read()))
+svgs = {f[5:-4] for f in os.listdir(os.path.join(ROOT, 'yaz0data', 'themes', 'Yaz0moto', 'icons'))}
 check('every icon the editor uses has a theme icon', used <= svgs, sorted(used - svgs))
 icon = GetIcon('realview')
 check('theme icons are drawn sharp at several sizes', len(icon.availableSizes()) >= 4 and not icon.pixmap(24, 24).isNull())
@@ -220,8 +220,8 @@ check('switching to a theme without a style sheet clears the old one', app.style
 
 # ---------------------------------------------------------------- themes built on the Yaz0moto theme
 
-from miyamoto import themevars
-from miyamoto.ui import MiyamotoTheme, availableThemes
+from yaz0moto import themevars
+from yaz0moto.ui import MiyamotoTheme, availableThemes
 
 dark = themevars.derive({'accent': '#F7941D', 'background': '#1C1C1F', 'text': '#ECECEF'})
 light = themevars.derive({'accent': '#3F7BFF', 'background': '#EAF1FF', 'text': '#1E2A44'})
@@ -254,10 +254,10 @@ check('a theme made in the theme editor loads back',
 
 # ---------------------------------------------------------------- actor icons
 
-from miyamoto import spriteicons
+from yaz0moto import spriteicons
 globals.Sprites = [None] * 10
 globals.NumSprites = 10
-from miyamoto.gamedefs import MiyamotoGameDefinition
+from yaz0moto.gamedefs import MiyamotoGameDefinition
 patch = os.path.join(globals.user_data_path, 'patches', 'MyPatch')
 os.makedirs(os.path.join(patch, 'icons'))
 open(os.path.join(patch, 'main.xml'), 'w').write('<game name="My Patch" />')
@@ -277,7 +277,7 @@ check('otherwise the Bowser face is drawn', not icon8.isNull() and QtGui.QColor(
 
 # ---------------------------------------------------------------- parts bar
 
-from miyamoto import partsbar
+from yaz0moto import partsbar
 check('parts round-trip through their text form',
       all(partsbar.decode(partsbar.encode(k)) == k for k in (('obj', 2, 17), ('spr', 45), ('spr', 'MyActor'))))
 globals.mainWindow = mock.MagicMock()
@@ -295,8 +295,8 @@ check('parts of tilesets that are not loaded are left off the bar',
 
 # ---------------------------------------------------------------- welcome star
 
-from miyamoto.welcomestar import splitStar
-image = QtGui.QImage(os.path.join(ROOT, 'miyamotodata', 'app_icons', 'yaz0moto1024.png')).scaled(216, 216)
+from yaz0moto.welcomestar import splitStar
+image = QtGui.QImage(os.path.join(ROOT, 'yaz0data', 'app_icons', 'yaz0moto1024.png')).scaled(216, 216)
 split = splitStar(image)
 check('the star is found in the app icon', split is not None and 90 < split[2].x() < 126)
 

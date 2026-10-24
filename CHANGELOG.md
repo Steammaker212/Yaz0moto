@@ -1,7 +1,7 @@
 # Unreleased
 
 ## Features
-- **Check Level** (Area menu, Ctrl+Shift+K): lists likely mistakes in the open level without blocking anything, such as warps to entrances that don't exist, duplicate entrance IDs, a missing start entrance, sprites or entrances outside every zone, overlapping zones, a wrong number of Star Coins or two Star Coins with the same number, more than one checkpoint, sprites that point at a path, location or entrance that doesn't exist, movement/event IDs nothing else uses, paths with one node, duplicated sprites and walking enemies with no ground below them. Double-click a problem to select it. The rules are in `miyamotodata/levelcheck_rules.json`; *Edit rules...* makes your own copy to change
+- **Check Level** (Area menu, Ctrl+Shift+K): lists likely mistakes in the open level without blocking anything, such as warps to entrances that don't exist, duplicate entrance IDs, a missing start entrance, sprites or entrances outside every zone, overlapping zones, a wrong number of Star Coins or two Star Coins with the same number, more than one checkpoint, sprites that point at a path, location or entrance that doesn't exist, movement/event IDs nothing else uses, paths with one node, duplicated sprites and walking enemies with no ground below them. Double-click a problem to select it. The rules are in `yaz0data/levelcheck_rules.json`; *Edit rules...* makes your own copy to change
 - The Check Level window's **Metrics** tab counts sprites, enemies, Star Coins, checkpoints, entrances, paths and objects, and compares them with every original course in your game folder (median, and how many courses are below this level)
 - **Export Mod Package** (File menu): saves the level and writes a `.zip` laid out like the game's folders (`romfs/Course`, plus the tilesets you made or changed in `romfs/Unit` for Deluxe) with a manifest listing each file's size and SHA-256
 - **Undo History** window (View menu): shows every step that can be undone; click one to go back or forward to it
@@ -16,17 +16,22 @@
 - **Theme Editor** (Preferences > Themes > Create Theme...): pick an accent, background, text and level colour and how round things are, with a live preview, and save your own theme
 - **Bigger, rounder interface:** toolbar icons are 24 px by default (Preferences > Themes > Toolbar icons: 16 to 40 px) and controls are rounder
 - **Parts bar** (View > Parts Bar), after Super Mario Maker's: your recent tileset objects and actors as big tiles on their own row under the main toolbar. Click one to paint with it or drag it onto the level; the orange button shows every part (each tileset, and the actors with a search box). Parts you pick in the palette are added to it
-- **Actors as icons** in the Add Actors palette (toggle next to the search box): each actor's sprite image, or a PNG named after its ID in the active patch (`patches/<patch name>/icons/<actor id>.png`), or the no-image picture (`miyamotodata/sprites/no-image-sprite.png`) with its name. Actors can be dragged from here onto the level too
+- **Actors as icons** in the Add Actors palette (toggle next to the search box): each actor's sprite image, or a PNG named after its ID in the active patch (`patches/<patch name>/icons/<actor id>.png`), or the no-image picture (`yaz0data/sprites/no-image-sprite.png`) with its name. Actors can be dragged from here onto the level too
 - Click the star on the welcome page (or in the About box)
 - **New mouse controls:** pick a part with a left click (in the palette, the actor icons or the parts bar), then left click in the level to place it, dragging to size it; click the picked part again, press Esc or right-click empty space to put it down. With nothing picked, left click selects things and drags them around. Right click on anything selects it, opens its properties and shows what it is (actor name and ID, object and tileset, entrance type...) with its actions. The entrance, path, location, comment and Nabbit path tools place on empty space and select those things when clicked on them. The cursor is a crosshair while a part is picked
 
 ## Changes
-- Right-clicking an actor shows a menu with **Info...** (name, ID, position, zone, layer, raw data and notes), **Settings...** (opens its properties) and **Delete**, instead of opening its properties straight away
+- Right-clicking an actor shows a menu with **Info...** (name, ID, position, zone, layer, raw data and notes) and **Delete**, instead of opening its properties straight away
 - Dragging a selection box selects what it passes over without opening the properties window or showing tooltips; the properties window opens only when a thing is clicked directly
+- Placing an actor no longer opens its properties window; click the actor to change its settings
+- Actors without a sprite image show their patch icon (`patches/<patch name>/icons/<actor id>.png`) in the level instead of the box with their ID, drawn slightly larger than the box; only the box is clicked or selected
 - **Esc** closes the window or menu in front, like its X button (the properties window first, from the level view), then puts down the picked part. It never closes the editor
 - **Live Background** and **Animate Live Background** now have toolbar buttons (next to the grid button) and can be turned on or off under Preferences > Toolbar. Toolbar buttons added in an update now show up for people who customised their toolbar before
 - The updater also understands release tags like `release-1.2.0` or `Yaz0moto-v1.2.0`, and a failed automatic update check is shown in the status bar instead of being ignored
 - The release workflow refuses versions that are not `X.Y.Z`, which the updater could not compare
+- Clips are exported as `.yaz0clip` files. Import Clip still opens `.miyaclip` files from older versions and other editors
+- The recovery copy of an unsaved level is written every minute instead of every 20 seconds, and a "Saved to temporary file" message shows at the bottom left for a few seconds each time
+- Changing the theme, style, UI scale, toolbar, actor notes or info icons, or turning mods on or off in Preferences, asks to restart Yaz0moto (**Restart Now** or **Restart Later**) and opens the level again where it was (same file, same area, unsaved changes kept). Unsaved tileset changes are saved first. Undo history starts fresh after the restart
 
 ## Fixes
 - Fixed placing an object from the Main tileset before clicking a palette tab placing a missing object (orange warning triangle) or one from another tileset

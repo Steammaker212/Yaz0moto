@@ -3327,7 +3327,7 @@
 		<value nybble="4" title="Unknown Value 4" />
         <checkbox nybble="6" mask="1" title="Upside Down*" comment="Does not work with Gyroscopic or Tilted" category="behavior" requirednybble="21-22" requiredval="1-255"/>
         <dualbox bit="24" title1="Clockwise Tilt" title2="Counter-Clockwise Tilt" comment="When checked, this Goomba doesn't despawn when leaving the visible camera window." category="behavior" requirednybble="21-22" requiredval="0" />
-        <checkbox nybble="6" mask="2" title="Gyroscopic Movement**" category="movement" comment="incorrect block center. When this setting is checked, miyamoto will make the block extend 1 block too far down, THIS IS INTENTIONAL. The question block doesnt rotate gyroscopically in the correct manner. Instead of it rotating from the center, it rotates as if the origin is the bottom of the block. By changing the height of the block in the viewer, this accounts for this." />
+        <checkbox nybble="6" mask="2" title="Gyroscopic Movement**" category="movement" comment="incorrect block center. When this setting is checked, Yaz0moto will make the block extend 1 block too far down, THIS IS INTENTIONAL. The question block doesnt rotate gyroscopically in the correct manner. Instead of it rotating from the center, it rotates as if the origin is the bottom of the block. By changing the height of the block in the viewer, this accounts for this." />
         <checkbox nybble="6" mask="4" title="Tilted" category="behavior" comment="There is sadly not a possible way to code this in the viewer." />
         <checkbox nybble="6" mask="8" title="Unknown Value 6 Mask 8" />
 		<list nybble="9" title="Tilt" comment="Values may not be precise." category="behavior" requirednybble="21-22" requiredval="0">

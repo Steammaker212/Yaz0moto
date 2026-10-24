@@ -123,6 +123,16 @@ jobs:
                             os.unlink(macos_item)
                             shutil.move(res_item, macos_item)
                             print(f'>> Fixed symlink to physical folder and transferred: {name}')
+              # codesign --deep takes any folder with a dot in its name for a nested
+              # bundle and refuses to sign it (e.g. the example patch's .github folder).
+              # The app never reads these, so drop them from the bundle. Only our own data
+              # folders are cleaned: libraries can keep real code in hidden folders (.dylibs).
+              for data_dir in ('yaz0data', 'yaz0extras'):
+                  for root, dirs, files in os.walk(os.path.join(macos_dir, data_dir)):
+                      for d in [d for d in dirs if d.startswith('.')]:
+                          shutil.rmtree(os.path.join(root, d))
+                          print(f'>> Removed hidden folder: {os.path.join(root, d)}')
+                          dirs.remove(d)
           print("\nPre-package script successful.")
           EOF
 
@@ -201,7 +211,7 @@ jobs:
           mkdir -p "${APPDIR}"
           cp -r "distrib/miyamoto_v${V}/." "${APPDIR}/"
           cp buildtools/Yaz0moto.desktop "${APPDIR}/Yaz0moto.desktop"
-          cp miyamotodata/app_icons/yaz0moto1024.png "${APPDIR}/Yaz0moto.png"
+          cp yaz0data/app_icons/yaz0moto1024.png "${APPDIR}/Yaz0moto.png"
           cp buildtools/AppRun           "${APPDIR}/AppRun"
           chmod +x "${APPDIR}/AppRun" "${APPDIR}/Yaz0moto"
 

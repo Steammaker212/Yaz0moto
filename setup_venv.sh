@@ -12,4 +12,4 @@ python3 -m venv .venv
 
 echo ""
 echo "Done. Run Yaz0moto with:"
-echo "  .venv/bin/python3 yaz0moto.py"
+echo "  .venv/bin/python3 main.py"

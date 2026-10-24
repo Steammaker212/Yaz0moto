@@ -466,7 +466,7 @@ def LoadEntranceNames(reload_=False):
 
 def _OpenTilesetWiiU(name):
     """
-    Wii U: the tileset archive was embedded in the level (or loaded from miyamotoextras).
+    Wii U: the tileset archive was embedded in the level (or loaded from yaz0extras).
     Returns (sarc, img, nml, colldata, loadAnimation, indexFormat), None if missing, or False on error.
     """
     # if this file's not found, return
@@ -750,7 +750,7 @@ def ResolveBaseGameForDeluxe(useDX, base_game=None):
 def LoadGameDef(base_game=None, mods=None, dlg=None):
     """
     Loads a game + mods chain.
-    base_game: folder name in miyamotodata/games/ (default 'NSMBU')
+    base_game: folder name in yaz0data/games/ (default 'NSMBU')
     mods: ordered list of mod folder names (applied on top of base game)
     """
     if mods is None:

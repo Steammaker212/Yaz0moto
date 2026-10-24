@@ -86,7 +86,7 @@ class AboutDialog(QtWidgets.QDialog):
 
         import platform as _platform
         icon_name = 'yaz0moto1024mac.png' if _platform.system() == 'Darwin' else 'yaz0moto1024.png'
-        icon_path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', icon_name)
+        icon_path = os.path.join(globals.miyamoto_path, 'yaz0data', 'app_icons', icon_name)
         if os.path.isfile(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
         else:
@@ -1498,7 +1498,7 @@ class BGTab(QtWidgets.QWidget):
                     filename = candidate
                     break
             if filename is None:
-                filename = os.path.join(globals.miyamoto_path, 'miyamotodata', 'bg', 'no_preview.png')
+                filename = os.path.join(globals.miyamoto_path, 'yaz0data', 'bg', 'no_preview.png')
         else:
             folders = globals.gamedef.recursiveFiles('bg', False, True)
             for folder in folders:
@@ -1514,7 +1514,7 @@ class BGTab(QtWidgets.QWidget):
                         filename = candidate
                         break
                 if filename is None:
-                    filename = os.path.join(globals.miyamoto_path, 'miyamotodata', 'bg', 'no_preview.png')
+                    filename = os.path.join(globals.miyamoto_path, 'yaz0data', 'bg', 'no_preview.png')
 
         pix = QtGui.QPixmap(filename)
         self.preview.setPixmap(pix)
@@ -3259,7 +3259,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                     if folder is None:
                         return
                     _upd = os.path.join(globals.user_data_path, 'patches')
-                    _bpd = os.path.join(globals.miyamoto_path, 'miyamotodata', 'patches')
+                    _bpd = os.path.join(globals.miyamoto_path, 'yaz0data', 'patches')
                     mod_dir = (os.path.join(_upd, folder)
                                if os.path.isdir(os.path.join(_upd, folder))
                                else os.path.join(_bpd, folder)
@@ -3835,7 +3835,7 @@ class WelcomeDialog(QtWidgets.QDialog):
 
         import platform as _platform
         icon_name = 'yaz0moto1024mac.png' if _platform.system() == 'Darwin' else 'yaz0moto1024.png'
-        icon_path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', icon_name)
+        icon_path = os.path.join(globals.miyamoto_path, 'yaz0data', 'app_icons', icon_name)
         if os.path.isfile(icon_path):
             self.setWindowIcon(QtGui.QIcon(icon_path))
 

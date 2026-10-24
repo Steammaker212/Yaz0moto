@@ -44,7 +44,7 @@ py -3 -c "from setuptools import setup, Extension; from Cython.Build import cyth
 ### Step 4: Launch Yaz0moto
 
 ```powershell
-py -3 yaz0moto.py
+py -3 main.py
 ```
 
 The setup wizard should open.

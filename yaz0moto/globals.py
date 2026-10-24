@@ -17,8 +17,8 @@ def _load_project_info():
     if getattr(sys, 'frozen', False):
         # cx_Freeze stores packages under lib/<pkg>/ inside the frozen app.
         # include_files land at lib/'s parent (3 dirname levels up from __file__):
-        #   build_exe Win/Linux: distrib/miyamoto_v1.0/lib/miyamoto/ -> distrib/miyamoto_v1.0/
-        #   bdist_mac:           Contents/Resources/lib/miyamoto/    -> Contents/Resources/
+        #   build_exe Win/Linux: distrib/miyamoto_v1.0/lib/yaz0moto/ -> distrib/miyamoto_v1.0/
+        #   bdist_mac:           Contents/Resources/lib/yaz0moto/    -> Contents/Resources/
         # Fallbacks cover alternative bundle layouts just in case.
         _mod = os.path.realpath(__file__)
         candidates = [
@@ -35,7 +35,7 @@ def _load_project_info():
         tried = '\n'.join(f'  {os.path.join(b, "project.json")}' for b in candidates)
         raise FileNotFoundError(f'project.json not found in frozen app. Tried:\n{tried}')
     else:
-        # Development: project root is two levels up from miyamoto/globals.py
+        # Development: project root is two levels up from yaz0moto/globals.py
         base = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         with open(os.path.join(base, 'project.json'), 'r', encoding='utf-8') as _f:
             return json.load(_f)
@@ -128,7 +128,7 @@ UseOuterSarcFormat = False
 ModifyInnerName = False
 
 # user_data_path must be resolved before miyamoto_path so it can be included
-# in the miyamotodata search candidates (downloaded data lives here).
+# in the yaz0data search candidates (downloaded data lives here).
 def _user_data_parent():
     if platform.system() == 'Darwin':
         return os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
@@ -167,14 +167,14 @@ if getattr(sys, 'frozen', False):
     ]
     miyamoto_path = next(
         (c.replace("\\", "/") for c in _frozen_candidates
-         if os.path.isdir(os.path.join(c, 'miyamotodata'))),
+         if os.path.isdir(os.path.join(c, 'yaz0data'))),
         os.path.dirname(sys.executable).replace("\\", "/")
     )
     del _mod, _frozen_candidates
 else:
     miyamoto_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__))).replace("\\", "/")
 
-# actor_data_path: the downloadable actor data folder (separate from miyamotodata).
+# actor_data_path: the downloadable actor data folder (separate from yaz0data).
 # Prefers the user's downloaded copy; falls back to a bundled copy at the repo root.
 _actor_data_candidates = [
     os.path.join(user_data_path, 'data'),

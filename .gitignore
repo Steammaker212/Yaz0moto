@@ -1,6 +1,6 @@
 
 __pycache__/
-miyamoto/__pycache__/
+yaz0moto/__pycache__/
 ignore/
 .idea/
 build/
@@ -26,8 +26,11 @@ bc3
 .DS_Store
 yaz0moto.sh
 
-/tools/*/*.tmp
-/tools/*/*.gtx
+# Everything else in tools/ is shipped and must stay tracked. Older versions ran
+# nvcompress inside tools/<platform>/ and left these behind; it now uses a temp folder.
+/tools/*/tmp.png
+/tools/*/tmp.dds
+
 *.dmg
 # Build artifacts
 *.pyd

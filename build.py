@@ -11,7 +11,7 @@
 # Builds Miyamoto! to a binary
 # Use the values below to configure the release:
 
-from miyamoto.globals import MiyamotoVersion
+from yaz0moto.globals import MiyamotoVersion
 import os, os.path, platform, shutil, sys
 
 # Set architectures for universal build on macOS.
@@ -77,9 +77,11 @@ if len(sys.argv) == 1:
 if os.path.isdir(dir_): shutil.rmtree(dir_)
 os.makedirs(dir_)
 
-# exclude QtWebChannel, QtWebSockets and QtNetwork to save space, plus Python stuff we don't use
+# exclude QtWebChannel, QtWebSockets and QtNetwork to save space, plus Python stuff we don't use.
+# ssl must stay: requests needs it for the updater and patch downloads (HTTPS).
+# Cython/pyximport only compile .pyx files when running from source; frozen builds ship them compiled.
 excludes = ['doctest', 'pdb', 'unittest', 'difflib',
-    'multiprocessing', 'ssl',
+    'multiprocessing', 'Cython', 'pyximport',
     'PyQt5.QtWebChannel', 'PyQt5.QtWebSockets', 'PyQt5.QtNetwork']
 
 # Extension flags — derived from ARCHFLAGS (already set above for macOS)
@@ -137,20 +139,38 @@ bntx_bcn_decompress_ext = Extension(
     extra_link_args=extra_args
 )
 
+# Imported at startup to detect Cython (yaz0moto/app.py) and to decode tilesets fast
+# (yaz0moto/tileset.py); from source pyximport builds them, frozen builds need them here
+cython_available_ext = Extension(
+    name="cython_available",
+    sources=["cython_available.pyx"],
+    extra_compile_args=extra_args,
+    extra_link_args=extra_args
+)
+
+gtx_quick_ext = Extension(
+    name="gtx_quick_cy",
+    sources=["gtx_quick_cy.pyx"],
+    extra_compile_args=extra_args,
+    extra_link_args=extra_args
+)
+
 # Platform-specific include_files
 include_files = [
-    'miyamotodata',
-    'miyamotoextras',
+    'yaz0data',
+    'yaz0extras',
     'project.json',
     'license.txt',
     'README.md'
 ]
+# (source, target): a bare 'tools/win' would land at win/, but tileset.writeGTX
+# looks for nvcompress in tools/<platform>/
 if sys.platform == 'darwin':
-    include_files.append('tools/mac')
+    include_files.append(('tools/mac', 'tools/mac'))
 elif sys.platform == 'win32':
-    include_files.append('tools/win')
+    include_files.append(('tools/win', 'tools/win'))
 else:
-    include_files.append('tools/linux')
+    include_files.append(('tools/linux', 'tools/linux'))
 
 # Set it up
 base = 'gui' if sys.platform == 'win32' else None
@@ -161,10 +181,10 @@ setup(
     options={
         'build_exe': {
             'excludes': excludes,
-            'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'bntxlib', 'bntxlib.bcn', 'miyamoto', 'requests', 'certifi'],
+            'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'bntxlib', 'bntxlib.bcn', 'yaz0moto', 'requests', 'certifi'],
             # PyQt5 loads its OpenGL function wrappers by name at runtime, so cx_Freeze
-            # can't see them: the live background (miyamoto/dvgl.py) needs this one
-            'includes': ['fastyz', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0', 'PyQt5.QtSvg'],
+            # can't see them: the live background (yaz0moto/dvgl.py) needs this one
+            'includes': ['fastyz', 'cython_available', 'gtx_quick_cy', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0', 'PyQt5.QtSvg'],
             'build_exe': dir_,
             'optimize': 2,
             'silent': True,
@@ -172,17 +192,18 @@ setup(
             },
         'bdist_mac': {
             'bundle_name': 'Yaz0moto',
-            'iconfile': 'miyamotodata/app_icons/yaz0moto.icns',
+            'iconfile': 'yaz0data/app_icons/yaz0moto.icns',
         }
         },
     cmdclass = cmdclass_dict,
     ext_modules = cythonize([fastyz_ext, addrlib_ext, bc3_compress_ext, bc3_decompress_ext,
-                            bntx_swizzle_ext, bntx_formconv_ext, bntx_bcn_decompress_ext], language_level=3),
+                            bntx_swizzle_ext, bntx_formconv_ext, bntx_bcn_decompress_ext,
+                            cython_available_ext, gtx_quick_ext], language_level=3),
     executables = [
         Executable(
-            'yaz0moto.py',
+            'main.py',
             target_name = 'Yaz0moto',
-            icon = 'miyamotodata/app_icons/win_icon.ico',
+            icon = 'yaz0data/app_icons/win_icon.ico',
             base = base,
             ),
         ],

@@ -1050,13 +1050,13 @@ class _PasteClipDialog(QtWidgets.QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Paste MiyamotoClip')
+        self.setWindowTitle('Paste Clip')
         self.setMinimumWidth(440)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
-        label = QtWidgets.QLabel('Paste a MiyamotoClip string below:')
+        label = QtWidgets.QLabel('Paste a copied clip below:')
         self.editor = QtWidgets.QPlainTextEdit()
-        self.editor.setPlaceholderText('MiyamotoClip|…|%')
+        self.editor.setPlaceholderText('Copied clip text')
         self.editor.setFixedHeight(96)
         mono = QtGui.QFont('Courier')
         mono.setStyleHint(QtGui.QFont.Monospace)
@@ -1257,8 +1257,8 @@ class ClipChooserWidget(QtWidgets.QWidget):
         if not self._is_valid(clean):
             QtWidgets.QMessageBox.warning(
                 self, 'Invalid Clip',
-                'The provided text is not a valid MiyamotoClip string.\n\n'
-                'A valid clip starts with "MiyamotoClip|" and ends with "|%".')
+                'The provided text is not a valid clip.\n\n'
+                'Copy a selection in the level editor, or open an exported clip file.')
             return
         name = self._prompt_name(default_name)
         if name is None:
@@ -1297,7 +1297,8 @@ class ClipChooserWidget(QtWidgets.QWidget):
     def _on_import_file(self):
         fn, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, 'Import Clip', '',
-            'MiyamotoClip files (*.miyaclip);;Text files (*.txt);;All files (*)')
+            # .miyaclip: clips exported by older versions and other Miyamoto-based editors
+            'Clip files (*.yaz0clip *.miyaclip);;Text files (*.txt);;All files (*)')
         if not fn:
             return
         try:
@@ -1357,8 +1358,8 @@ class ClipChooserWidget(QtWidgets.QWidget):
     def _export(self, clip):
         safe = ''.join(c if c.isalnum() or c in ' _-' else '_' for c in clip.name)
         fn, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, 'Export Clip', safe + '.miyaclip',
-            'MiyamotoClip files (*.miyaclip);;Text files (*.txt)')
+            self, 'Export Clip', safe + '.yaz0clip',
+            'Clip files (*.yaz0clip);;Text files (*.txt)')
         if not fn:
             return
         try:
@@ -5028,7 +5029,13 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         if (button == Qt.LeftButton and event.buttons() == Qt.LeftButton and modifiers == Qt.NoModifier
                 and self.wouldPlace(event.pos())):
             self.placing = True
-            self.classicMousePressEvent(self.withButton(event, QtCore.QEvent.MouseButtonPress, Qt.RightButton, Qt.RightButton))
+            # A placed actor is selected quietly: its settings open when it's clicked, not now
+            mw = globals.mainWindow
+            mw.quietSelection = globals.CurrentPaintType == 4
+            try:
+                self.classicMousePressEvent(self.withButton(event, QtCore.QEvent.MouseButtonPress, Qt.RightButton, Qt.RightButton))
+            finally:
+                mw.quietSelection = False
             return
 
         if button == Qt.RightButton and event.buttons() == Qt.RightButton and modifiers != Qt.ControlModifier:
@@ -5154,6 +5161,8 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         what it is, with its actions. On empty space, a picked part is put down.
         """
         items = self.levelItems(event.pos())
+        # A zone lies over everything in it, so it only counts when nothing else is there
+        items.sort(key=lambda i: isinstance(i, ZoneItem))
         mw = globals.mainWindow
         if not items:
             if partsbar.isArmed():
@@ -5163,7 +5172,7 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         item = items[0]
         isActor = isinstance(item, SpriteItem)
         if not item.isSelected():
-            # An actor's panel opens from "Settings", not from the right click itself
+            # An actor's panel opens when it's clicked, not from the right click
             mw.quietSelection = isActor
             try:
                 self.scene().clearSelection()
@@ -5177,7 +5186,6 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         menu.addSeparator()
         if isActor:
             menu.addAction(GetIcon('info'), 'Info...', lambda: self.showActorInfo(item))
-            menu.addAction(GetIcon('settings'), 'Settings...', mw.ShowSelectionProperties)
             menu.addSeparator()
             delete = menu.addAction(GetIcon('delete'), 'Delete')
             delete.triggered.connect(lambda: QtWidgets.QApplication.sendEvent(
@@ -7021,3 +7029,68 @@ class IconsOnlyTabBar(QtWidgets.QTabBar):
             res.setWidth(res.height() * 2)
 
         return res
+
+
+class ToastPopup(QtWidgets.QLabel):
+    """
+    A short message that fades in at the bottom left of a main window (above the
+    status bar), stays a few seconds and fades out. It never takes focus or clicks.
+    """
+    MARGIN = 12
+    FADE_MS = 200
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window_ = window
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setFocusPolicy(Qt.NoFocus)
+        # Theme colours: a tooltip-like box that works in light and dark themes
+        self.setStyleSheet(
+            'QLabel { background-color: palette(window-text); color: palette(window);'
+            ' border-radius: 6px; padding: 7px 14px; }')
+
+        self.opacity = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity)
+        self.fade = QtCore.QPropertyAnimation(self.opacity, b'opacity', self)
+        self.fade.setDuration(self.FADE_MS)
+        self.fade.finished.connect(self._fadeFinished)
+        self.hideTimer = QtCore.QTimer(self)
+        self.hideTimer.setSingleShot(True)
+        self.hideTimer.timeout.connect(lambda: self._fadeTo(0.0))
+
+        window.installEventFilter(self)
+        self.hide()
+
+    def showMessage(self, text, msecs=3000):
+        self.setText(text)
+        self.adjustSize()
+        self._place()
+        self.raise_()
+        if not self.isVisible():
+            self.opacity.setOpacity(0.0)
+            self.show()
+        self._fadeTo(0.92)
+        self.hideTimer.start(msecs)
+
+    def _fadeTo(self, value):
+        self.fade.stop()
+        self.fade.setStartValue(self.opacity.opacity())
+        self.fade.setEndValue(value)
+        self.fade.start()
+
+    def _fadeFinished(self):
+        if self.opacity.opacity() == 0.0:
+            self.hide()
+
+    def _place(self):
+        bottom = self.window_.height() - self.MARGIN
+        statusBar = self.window_.statusBar()
+        if statusBar.isVisible():
+            bottom -= statusBar.height()
+        self.move(self.MARGIN, bottom - self.height())
+
+    def eventFilter(self, obj, event):
+        if obj is self.window_ and event.type() == QtCore.QEvent.Resize and self.isVisible():
+            self._place()
+        return False

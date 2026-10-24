@@ -102,7 +102,7 @@ class AbstractArea:
                 if self.tileset0 in globals.Pa0Tilesets:
                     reply = QtWidgets.QMessageBox.question(globals.mainWindow, 'Warning',
                                                            '"%s" tileset was not found in the level data!\n' \
-                                                           'Do you want to load the default one from miyamotoextras?' % self.tileset0,
+                                                           'Do you want to load the default one from yaz0extras?' % self.tileset0,
                                                            QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No)
 
                     if reply == QtWidgets.QMessageBox.Yes:

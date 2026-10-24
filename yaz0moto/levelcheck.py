@@ -13,7 +13,7 @@ Nothing here blocks saving or changes the level. The checks read a snapshot of e
 area (the open area from the editor items, the other areas from their raw course
 data), so the same code also measures the original courses for comparison.
 
-The rules live in miyamotodata/levelcheck_rules.json. A copy in the user data folder
+The rules live in yaz0data/levelcheck_rules.json. A copy in the user data folder
 overrides it key by key, so users can turn checks off, change their severity or
 extend the sprite lists without editing the bundled file.
 """
@@ -188,7 +188,7 @@ def _deep_update(base, override):
 
 
 def default_rules_path():
-    return os.path.join(globals.miyamoto_path, 'miyamotodata', RULES_FILE)
+    return os.path.join(globals.miyamoto_path, 'yaz0data', RULES_FILE)
 
 
 def user_rules_path():

@@ -22,9 +22,9 @@ os.chdir(ROOT)
 from PyQt5 import QtWidgets
 app = QtWidgets.QApplication([])
 
-from miyamoto import globals
-from miyamoto import levelcheck, modexport, updater
-from miyamoto.undomanager import Command, UndoManager
+from yaz0moto import globals
+from yaz0moto import levelcheck, modexport, updater
+from yaz0moto.undomanager import Command, UndoManager
 
 results = []
 
@@ -248,12 +248,12 @@ check('a "release-" tag is seen as a newer version', release.version == '9.0.0' 
 import math as _math
 from xml.etree import ElementTree as _etree
 from PyQt5 import QtCore
-from miyamoto import movementpreview as MP
-from miyamoto.misc import SpriteDefinition
+from yaz0moto import movementpreview as MP
+from yaz0moto.misc import SpriteDefinition
 
 # The real sprite definitions, so the settings the preview reads are the ones in spritedata.xml
 _defs = {}
-for _elem in _etree.parse('miyamotodata/games/NSMBU/spritedata.xml').getroot():
+for _elem in _etree.parse('yaz0data/games/NSMBU/spritedata.xml').getroot():
     if _elem.tag == 'sprite' and int(_elem.attrib['id']) in (47, 48, 68, 69, 70, 100, 116, 118, 214, 238, 239, 297):
         _d = SpriteDefinition()
         _d.loadFrom(_elem)

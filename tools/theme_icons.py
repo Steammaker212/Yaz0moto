@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Generates the SVG icons of the "Yaz0moto" theme (miyamotodata/themes/Yaz0moto/icons)
+Generates the SVG icons of the "Yaz0moto" theme (yaz0data/themes/Yaz0moto/icons)
 and the small PNG images its style sheet uses (check marks, arrows...).
 
 The look follows the Yaz0moto logo: flat, minimal shapes in a light neutral with
@@ -18,7 +18,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-THEME = os.path.join(ROOT, 'miyamotodata', 'themes', 'Yaz0moto')
+THEME = os.path.join(ROOT, 'yaz0data', 'themes', 'Yaz0moto')
 ICONS = os.path.join(THEME, 'icons')
 IMAGES = os.path.join(THEME, 'images')
 
@@ -358,7 +358,7 @@ def write_images():
     only a fallback: Yaz0moto draws them in each theme's own colours when it loads.
     """
     sys.path.insert(0, ROOT)
-    from miyamoto import themevars
+    from yaz0moto import themevars
     from PyQt5 import QtCore, QtGui, QtSvg, QtWidgets
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     variables = themevars.derive()

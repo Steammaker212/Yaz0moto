@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
     A template: ${name} values come from the theme's accent, background and text (see
-    miyamoto/themevars.py). Entrances stay red, paths green, locations purple and comments
+    yaz0moto/themevars.py). Entrances stay red, paths green, locations purple and comments
     yellow in every theme, so they keep their meaning.
 -->
 <colors>

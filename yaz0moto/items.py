@@ -1631,6 +1631,10 @@ class SpriteItem(LevelEditorItem):
     BoundingRect = QtCore.QRectF(0, 0, globals.TileWidth, globals.TileWidth)
     SelectionRect = QtCore.QRectF(0, 0, globals.TileWidth - 1, globals.TileWidth - 1)
 
+    # A patch icon replacing the ID box is drawn this much larger than the box
+    ICON_SCALE = 2.5
+    customIcon = None
+
     def __init__(self, type, x, y, data, layer=0, initialState=0):
         """
         Creates a sprite with specific data
@@ -1745,9 +1749,17 @@ class SpriteItem(LevelEditorItem):
         self.setToolTip('<b>Actor [type]:</b><br>[name]'.replace('[type]', str(type)).replace('[name]', str(self.name)))
         self.UpdateListItem()
 
+        self.customIcon = None
         imgs = globals.gamedef.getImageClasses()
         if type in imgs:
             self.setImageObj(imgs[type])
+        else:
+            # A patch icon (icons/<id>.png) is drawn instead of the ID box; loaded at twice
+            # the drawn size so it stays sharp when zoomed in
+            from . import spriteicons
+            self.customIcon = spriteicons.levelIcon(type, int(globals.TileWidth * self.ICON_SCALE * 2))
+            if self.customIcon is not None:
+                self.UpdateRects()
 
     def setImageObj(self, obj):
         """
@@ -1838,6 +1850,10 @@ class SpriteItem(LevelEditorItem):
             LevelRect.width() / globals.TileWidth,
             LevelRect.height() / globals.TileWidth,
         )
+
+        # The icon is drawn a bit larger than the box (only the box takes clicks, see shape)
+        if self.showsCustomIcon():
+            self.BoundingRect = boundingRect | self.iconRect()
 
     def getFullRect(self):
         """
@@ -2020,6 +2036,26 @@ class SpriteItem(LevelEditorItem):
         # self.parent.updateScene()
         if self.scene() is not None: self.scene().update()
 
+    def showsCustomIcon(self, overrideGlobals=False):
+        """True if a patch icon is drawn instead of the ID box (sprite images shown)."""
+        return (self.customIcon is not None and (globals.SpriteImagesShown or overrideGlobals)
+                and self.ImageObj.spritebox.shown)
+
+    def iconRect(self):
+        """Where the icon is drawn: the box grown by ICON_SCALE around its centre."""
+        box = self.ImageObj.spritebox.BoundingRect
+        dx = box.width() * (self.ICON_SCALE - 1) / 2
+        dy = box.height() * (self.ICON_SCALE - 1) / 2
+        return box.adjusted(-dx, -dy, dx, dy)
+
+    def shape(self):
+        """With an icon, only the box is clicked and rubber-band selected, not the larger icon."""
+        if self.showsCustomIcon():
+            path = QtGui.QPainterPath()
+            path.addRect(self.ImageObj.spritebox.BoundingRect)
+            return path
+        return super().shape()
+
     def paint(self, painter, option=None, widget=None, overrideGlobals=False):
         """
         Paints the sprite
@@ -2052,6 +2088,19 @@ class SpriteItem(LevelEditorItem):
             # Determine the spritebox position
             if drawSpritebox:
                 spriteboxRect = self.ImageObj.spritebox.RoundedRect
+
+        # A patch icon replaces the box; when selected, the box is outlined over it
+        if drawSpritebox and self.showsCustomIcon(overrideGlobals):
+            painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(self.iconRect(), self.customIcon, QtCore.QRectF(self.customIcon.rect()))
+            if self.isSelected():
+                # See-through fill, so the icon stays visible (themes' box fill can be opaque)
+                fill = QtGui.QColor(globals.theme.color('spritebox_fill_s'))
+                fill.setAlpha(min(fill.alpha(), 90))
+                painter.setBrush(QtGui.QBrush(fill))
+                painter.setPen(QtGui.QPen(globals.theme.color('spritebox_lines_s'), 1 / 24 * globals.TileWidth))
+                painter.drawRoundedRect(spriteboxRect, 4, 4)
+            drawSpritebox = False
 
         # Draw the spritebox if applicable
         if drawSpritebox:

@@ -30,7 +30,7 @@ Pushes to `deluxe-support` that touch code or data publish a pre-release named `
 choose the nightly update channel in Preferences receive these.
 
 ## What the updater checks
-`miyamoto/updater.py` looks at the releases of `GITHUB_REPO` (`Steammaker212/Yaz0moto`), picks the file whose
+`yaz0moto/updater.py` looks at the releases of `GITHUB_REPO` (`Steammaker212/Yaz0moto`), picks the file whose
 name ends with the right platform suffix, and expects the executable names `Yaz0moto.exe`, `Yaz0moto.app`
 and `Yaz0moto.AppImage` inside. If you rename the repository or the program, change them together;
 `tests/branding_test.py` fails when the updater, build scripts, desktop file and workflows disagree.
@@ -42,9 +42,9 @@ git fetch upstream
 git checkout -b sync-upstream deluxe-support
 git merge upstream/master
 ```
-Expect conflicts in lines that were renamed (strings, `pyamoto.py` -> `yaz0moto.py`, workflows). Resolve them
+Expect conflicts in lines that were renamed (strings, `pyamoto.py` -> `main.py`, workflows). Resolve them
 keeping the Yaz0moto names, run both tests, then open a pull request into `deluxe-support`. Keep upstream's licence
 headers and credits as they are.
 
 ## Branding
-App icons are in `miyamotodata/app_icons/` and the README banner is `docs/banner.png`.
+App icons are in `yaz0data/app_icons/` and the README banner is `docs/banner.png`.

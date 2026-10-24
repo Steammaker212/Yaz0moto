@@ -38,15 +38,15 @@ def read(path):
 # Anything listed here may keep the word, and why.
 ALLOWED = [
     # (file, text that may appear, reason)
-    ('miyamoto/puzzle.py', '__pyamoto_props__', 'key inside exported object files; renaming would break files made with Pyamoto'),
-    ('miyamoto/tileset.py', '_pyamoto_bntx', 'internal attribute name'),
-    ('miyamoto/dialogs.py', 'Based on <b>Pyamoto</b>', 'About box credits the project this is forked from'),
-    ('miyamoto/dialogs.py', 'A fork of Pyamoto.', 'About box credits the project this is forked from'),
-    ('miyamoto/globals.py', 'Pyamoto', 'old user-data folder name, only used to migrate settings'),
+    ('yaz0moto/puzzle.py', '__pyamoto_props__', 'key inside exported object files; renaming would break files made with Pyamoto'),
+    ('yaz0moto/tileset.py', '_pyamoto_bntx', 'internal attribute name'),
+    ('yaz0moto/dialogs.py', 'Based on <b>Pyamoto</b>', 'About box credits the project this is forked from'),
+    ('yaz0moto/dialogs.py', 'A fork of Pyamoto.', 'About box credits the project this is forked from'),
+    ('yaz0moto/globals.py', 'Pyamoto', 'old user-data folder name, only used to migrate settings'),
 ]
 SCAN_SUFFIXES = ('.py', '.yml', '.yaml', '.sh', '.desktop', '.json', '.txt', '.xml', '.pyx', '.pyxbld')
 SCAN_NAMES = ('AppRun', '.gitignore')
-SKIP_DIRS = {'.git', 'build', 'distrib', '__pycache__', 'FastYZ', '.venv', 'tools', 'docs', 'miyamotoextras'}
+SKIP_DIRS = {'.git', 'build', 'distrib', '__pycache__', 'FastYZ', '.venv', 'tools', 'docs', 'yaz0extras'}
 SKIP_FILES = {'tests/branding_test.py', 'license.txt', 'log.txt'}
 HEADER_LINES = 12   # the licence block at the top of every source file credits upstream; it must stay
 
@@ -77,15 +77,15 @@ check('no user-facing "Pyamoto" left in code, build files, CI or data (outside l
       not leftovers, '\n      ' + '\n      '.join(leftovers[:12]))
 
 # ---------------------------------------------------------------- files and names agree
-check('entry point yaz0moto.py exists and pyamoto.py is gone',
-      os.path.isfile('yaz0moto.py') and not os.path.exists('pyamoto.py'))
+check('entry point main.py exists and pyamoto.py is gone',
+      os.path.isfile('main.py') and not os.path.exists('pyamoto.py'))
 build = read('build.py')
-check('build.py freezes yaz0moto.py as "Yaz0moto"', "'yaz0moto.py'" in build and "target_name = 'Yaz0moto'" in build)
+check('build.py freezes main.py as "Yaz0moto"', "'main.py'" in build and "target_name = 'Yaz0moto'" in build)
 check('build.py macOS bundle is Yaz0moto.app with the new icon',
       "'bundle_name': 'Yaz0moto'" in build and 'yaz0moto.icns' in build and "'build/Yaz0moto.app'" in build)
 for icon in ('yaz0moto1024.png', 'yaz0moto1024mac.png', 'yaz0moto.icns', 'win_icon.ico'):
-    check('icon file exists: ' + icon, os.path.isfile('miyamotodata/app_icons/' + icon))
-check('old icon files are gone', not any(os.path.exists('miyamotodata/app_icons/' + f)
+    check('icon file exists: ' + icon, os.path.isfile('yaz0data/app_icons/' + icon))
+check('old icon files are gone', not any(os.path.exists('yaz0data/app_icons/' + f)
                                          for f in ('pyamoto.icns', 'pyamoto1024.png', 'pyamoto1024mac.png')))
 desktop = read('buildtools/Yaz0moto.desktop')
 check('Linux .desktop entry launches the Yaz0moto executable',
@@ -94,7 +94,7 @@ check('AppRun starts the Yaz0moto executable', '/Yaz0moto"' in read('buildtools/
 check('project.json id is Yaz0moto', 'Yaz0moto' in read('project.json'))
 
 # ---------------------------------------------------------------- updater and CI agree
-updater_src = read('miyamoto/updater.py')
+updater_src = read('yaz0moto/updater.py')
 check('updater checks THIS project\'s releases', ("GITHUB_REPO = '%s'" % REPO) in updater_src
       and 'Zenith-Team' not in updater_src)
 check('updater expects the executables the build produces',
@@ -112,10 +112,10 @@ check('workflows build from deluxe-support, not master', all('master' not in tex
       and 'branches: [deluxe-support]' in workflows['nightly.yml'])
 check('nightly rebuilds when bntxlib changes', "'bntxlib/**'" in workflows['nightly.yml'])
 check('release/nightly preflight checks the renamed entry point',
-      all('yaz0moto.py' in workflows[f] and 'pyamoto.py' not in workflows[f] for f in ('release.yml', 'nightly.yml')))
+      all('main.py' in workflows[f] and 'pyamoto.py' not in workflows[f] for f in ('release.yml', 'nightly.yml')))
 
 # the updater must pick the right asset out of a release named the way CI names things
-from miyamoto import updater  # noqa: E402  (imports Qt; fine headless)
+from yaz0moto import updater  # noqa: E402  (imports Qt; fine headless)
 assets = [{'name': n} for n in ('Yaz0moto-v1.0.0-Windows-x64.zip', 'Yaz0moto-v1.0.0-macOS-universal.zip',
                                 'Yaz0moto-v1.0.0-Linux-x86_64.zip', 'Yaz0moto-v1.0.0-Linux-x86_64.AppImage')]
 release = types.SimpleNamespace(assets=assets)
@@ -147,7 +147,7 @@ def data_parent(home, xdg, appdata):
 def run_globals(env_dirs, extra=''):
     home, xdg, appdata = env_dirs
     env = dict(os.environ, HOME=home, USERPROFILE=home, XDG_CONFIG_HOME=xdg, APPDATA=appdata, QT_QPA_PLATFORM='offscreen')
-    code = extra + 'import miyamoto.globals as g; print("USERDATA=" + g.user_data_path)'
+    code = extra + 'import yaz0moto.globals as g; print("USERDATA=" + g.user_data_path)'
     out = subprocess.run([sys.executable, '-c', code], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     m = re.search(r'USERDATA=(.*)', out.stdout)
     return (m.group(1).strip() if m else None), out
@@ -202,8 +202,8 @@ finally:
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PyQt5 import QtWidgets  # noqa: E402
 qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-import miyamoto.app  # noqa: E402,F401  (installs the Cython import hook and loads the UI modules)
-from miyamoto.dialogs import AboutDialog  # noqa: E402
+import yaz0moto.app  # noqa: E402,F401  (installs the Cython import hook and loads the UI modules)
+from yaz0moto.dialogs import AboutDialog  # noqa: E402
 
 about = AboutDialog()
 texts = [w.text() for w in about.findChildren(QtWidgets.QLabel)]
@@ -213,11 +213,11 @@ check('About box links to this project, not upstream', ('github.com/%s"' % REPO)
 check('About box names the maintainer and credits upstream', 'Steammaker212' in joined and 'Pyamoto' in joined and 'Miyamoto' in joined)
 check('About box no longer sends users to the Zenith Discord', 'discord' not in joined.lower())
 
-app_src = read('miyamoto/app.py')
+app_src = read('yaz0moto/app.py')
 check('main window title is Yaz0moto (and Yaz0moto Nightly)', "'Yaz0moto Nightly' if globals.MiyamotoReleaseType == 'nightly' else 'Yaz0moto'" in app_src)
 check('crash dialog points to this project\'s issues', ('https://github.com/%s/issues' % REPO) in app_src and 'go.nsmbu.net/discord' not in app_src)
-check('relaunching (new window) starts yaz0moto.py', "'yaz0moto.py'" in app_src and "'pyamoto.py'" not in app_src)
-check('exported-object files from Pyamoto are still readable', "'__pyamoto_props__'" in read('miyamoto/puzzle.py'))
+check('relaunching (new window) starts main.py', "'main.py'" in app_src and "'pyamoto.py'" not in app_src)
+check('exported-object files from Pyamoto are still readable', "'__pyamoto_props__'" in read('yaz0moto/puzzle.py'))
 
 # ---------------------------------------------------------------- documentation links
 def slug(heading):

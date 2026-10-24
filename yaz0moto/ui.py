@@ -108,7 +108,7 @@ def themeDirectories():
     """Return theme roots in load-precedence order."""
     return (
         os.path.join(globals.user_data_path, 'themes'),
-        os.path.join(globals.miyamoto_path, 'miyamotodata', 'themes'),
+        os.path.join(globals.miyamoto_path, 'yaz0data', 'themes'),
     )
 
 
@@ -463,7 +463,7 @@ class MiyamotoTheme:
                 del cache[name]
 
         if name not in cache:
-            ico_dir = os.path.join(globals.miyamoto_path, 'miyamotodata', 'ico', 'lg' if big else 'sm')
+            ico_dir = os.path.join(globals.miyamoto_path, 'yaz0data', 'ico', 'lg' if big else 'sm')
             path = os.path.join(ico_dir, 'icon-' + name)
             cache[name] = QtGui.QIcon(path)
 

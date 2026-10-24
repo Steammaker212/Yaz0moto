@@ -67,7 +67,7 @@ def FilesAreMissing():
     Checks to see if any of the required files for Miyamoto are missing
     """
 
-    data_dir = os.path.join(globals.miyamoto_path, 'miyamotodata')
+    data_dir = os.path.join(globals.miyamoto_path, 'yaz0data')
     if not os.path.isdir(data_dir):
         QtWidgets.QMessageBox.warning(None, 'Error', 'Sorry, you seem to be missing the required data files for Yaz0moto to work. Please redownload your copy of the editor.')
         return True

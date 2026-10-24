@@ -25,10 +25,10 @@ def _no_dialogs(self, *a):
 QtWidgets.QMessageBox.exec_ = _no_dialogs
 QtWidgets.QMessageBox.warning = staticmethod(lambda *a, **k: (_ for _ in ()).throw(RuntimeError('unexpected warning: ' + str(a[1:3]))))
 
-import miyamoto.app  # installs pyximport (builds fastyz) and imports everything
-from miyamoto import globals
-from miyamoto.misc import JsonSettings, setting, setSetting
-from miyamoto import tileset as T, loading, yaz0
+import yaz0moto.app  # installs pyximport (builds fastyz) and imports everything
+from yaz0moto import globals
+from yaz0moto.misc import JsonSettings, setting, setSetting
+from yaz0moto import tileset as T, loading, yaz0
 import SarcLib
 
 tmp = tempfile.mkdtemp()
@@ -50,7 +50,7 @@ nml_tex = bytes(bytearray(nml_tex[i] if i % 4 != 3 else 255 for i in range(len(n
 name = 'Pa0_jyotyu'
 globals.IsNSMBUDX = True          # PackTexture/Save paths read this
 bntx = T.writeBNTX([(name, main_tex, W, H), (name + '_nml', nml_tex, W, H)])
-tpl = open(os.path.join(ROOT, 'miyamotodata', 'games', 'NSMBUDX', 'output.bfres'), 'rb').read()
+tpl = open(os.path.join(ROOT, 'yaz0data', 'games', 'NSMBUDX', 'output.bfres'), 'rb').read()
 arc = SarcLib.SARC_Archive(endianness='<')
 arc.addFile(SarcLib.File('output.bfres', bytes(T.writeBFRES(tpl, bntx))))
 coll = b''.join(struct.pack('<Q', 0) for _ in range(256))
@@ -76,14 +76,14 @@ check('game paths exclude the Wii U base', [p for p in globals.gamedef.GetGamePa
 check('Unit folder resolved', globals.gamedef.GetUnitPaths() == [unit])
 check('tileset file found', globals.gamedef.FindTilesetFile(name) == os.path.join(unit, name + '.szs'))
 check('HasTileset true/false', T.HasTileset(name) and not T.HasTileset('Pa1_nope'))
-from miyamoto.verifications import isValidGamePath
+from yaz0moto.verifications import isValidGamePath
 open(os.path.join(course, '1-1.sarc'), 'wb').write(b'x')
 check('isValidGamePath(DX) needs Course+Unit', isValidGamePath(course, 'NSMBUDX'))
 os.rename(unit, unit + '_x'); check('isValidGamePath(DX) fails w/o Unit', not isValidGamePath(course, 'NSMBUDX')); os.rename(unit + '_x', unit)
 
 # ---------- tileset load through the real loader
 loading.LoadOverrides()
-from miyamoto.level import Level_NSMBU
+from yaz0moto.level import Level_NSMBU
 globals.Level = Level_NSMBU(); globals.Level.new()    # also runs CreateTilesets()
 globals.Pa0Tilesets = ['Pa0_jyotyu']
 try:
@@ -154,8 +154,8 @@ if loaded:
 
 
 # ---------- zone background tab: the "ushort format requires 0 <= number <= 0xffff" crash
-from miyamoto.dialogs import BGTab, ChooseLevelNameDialog
-from miyamoto.bytes import to_bytes
+from yaz0moto.dialogs import BGTab, ChooseLevelNameDialog
+from yaz0moto.bytes import to_bytes
 import struct as _struct
 
 def bg_tuple(parallax, name='Mori'):
@@ -215,8 +215,8 @@ check('the shared name list is not modified', named == [['World 1', [['Level 1',
 from unittest import mock
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QColor
-import miyamoto.app as appmod
-from miyamoto import puzzle
+import yaz0moto.app as appmod
+from yaz0moto import puzzle
 
 def solid(color, w=60, h=60):
     pm = QPixmap(w, h); pm.fill(QColor(*color)); return pm
@@ -301,7 +301,7 @@ def _snapshot(e):
                 animations=[(len(x.frames), _h(b''.join(_raw(f) for f in x.frames)))
                             for x in (a.block, a.hatena, a.blockL, a.hatenaL, a.tuka, a.belt)])
 
-_wiiu = os.path.join(ROOT, 'miyamotoextras', 'Pa0_jyotyu.szs')
+_wiiu = os.path.join(ROOT, 'yaz0extras', 'Pa0_jyotyu.szs')
 if os.path.isfile(_wiiu):
     _data = open(_wiiu, 'rb').read()
     _data = yaz0.decompressFASTYZ(_data) if _data[:4] == b'Yaz0' else _data

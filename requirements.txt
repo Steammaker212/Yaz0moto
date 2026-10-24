@@ -2,3 +2,4 @@ Cython==3.2.4
 PyQt5==5.15.11
 requests==2.32.3
 SarcLib==0.3
+cx_Freeze==8.4.1

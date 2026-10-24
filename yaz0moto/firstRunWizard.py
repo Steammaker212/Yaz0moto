@@ -36,7 +36,7 @@ OBJECTS_DOWNLOAD_URL = "https://github.com/nsmbu/editor-assets/releases/download
 def _icon_path():
     name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
     if globals.miyamoto_path:
-        p = os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', name)
+        p = os.path.join(globals.miyamoto_path, 'yaz0data', 'app_icons', name)
         if os.path.isfile(p):
             return p
     return None

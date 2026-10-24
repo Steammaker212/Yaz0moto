@@ -71,7 +71,7 @@ macOS and Linux:
 git clone --recurse-submodules https://github.com/Steammaker212/Yaz0moto
 cd Yaz0moto
 bash setup_venv.sh
-.venv/bin/python3 yaz0moto.py
+.venv/bin/python3 main.py
 ```
 A C compiler is needed for the Cython extensions.
 

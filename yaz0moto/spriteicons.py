@@ -11,7 +11,7 @@ Icons for actors (sprites), for the Add Actors palette and the parts bar. For ea
   1. its own image from the sprite images (the one drawn in the level), if it has one;
   2. otherwise a PNG named after the actor's ID in an "icons" folder of the active patch:
      patches/<patch name>/icons/<actor id>.png (e.g. icons/45.png);
-  3. otherwise miyamotodata/sprites/no-image-sprite.png (Bowser) with the actor's name under it.
+  3. otherwise yaz0data/sprites/no-image-sprite.png (Bowser) with the actor's name under it.
 
 Rendering loads images, so call these outside paint events (the grids queue them).
 """
@@ -26,7 +26,7 @@ from . import globals
 _cache = {}  # (type, size) -> QPixmap
 
 # The picture for actors with no icon (shown with the actor's name under it)
-NO_IMAGE = ('miyamotodata', 'sprites', 'no-image-sprite.png')
+NO_IMAGE = ('yaz0data', 'sprites', 'no-image-sprite.png')
 _noImage = None
 
 
@@ -117,7 +117,7 @@ def _pngIcon(type_id, size):
 
 
 def noImagePicture():
-    """miyamotodata/sprites/no-image-sprite.png, loaded once (None if it's missing)."""
+    """yaz0data/sprites/no-image-sprite.png, loaded once (None if it's missing)."""
     global _noImage
     if _noImage is None:
         image = QtGui.QImage(os.path.join(globals.miyamoto_path, *NO_IMAGE))
@@ -165,9 +165,24 @@ def spriteIcon(type_id, size=48):
     if key not in _cache:
         pix = None
         if isinstance(type_id, int):
-            pix = _spriteImage(type_id, size) or _pngIcon(type_id, size)
+            pix = _spriteImage(type_id, size)
+        pix = pix or _pngIcon(type_id, size)
         _cache[key] = pix or bowserIcon(size, spriteName(type_id))
     return _cache[key]
+
+
+_levelCache = {}  # (type, size) -> QPixmap or None
+
+
+def levelIcon(type_id, size):
+    """
+    The patch's "<id>.png" icon for an actor drawn in the level instead of its ID box,
+    or None if there isn't one (the box stays then, rather than the Bowser picture).
+    """
+    key = (type_id, size)
+    if key not in _levelCache:
+        _levelCache[key] = _pngIcon(type_id, size)
+    return _levelCache[key]
 
 
 def isCached(type_id, size=48):
@@ -176,3 +191,4 @@ def isCached(type_id, size=48):
 
 def clearCache():
     _cache.clear()
+    _levelCache.clear()

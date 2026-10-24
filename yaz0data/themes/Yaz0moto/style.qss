@@ -4,7 +4,7 @@
  * no blur).
  *
  * This is a template: ${name} values are worked out from the theme's accent,
- * background, text and roundness (see miyamoto/themevars.py), so every theme built
+ * background, text and roundness (see yaz0moto/themevars.py), so every theme built
  * on this one gets the same shapes in its own colours. {images} holds the check
  * marks and arrows, drawn in the theme's colours.
  */

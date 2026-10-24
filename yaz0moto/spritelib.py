@@ -119,7 +119,7 @@ def GetImg(imgname, image=False):
     imgname = str(imgname)
 
     # Try to find the best path
-    path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'sprites', imgname)
+    path = os.path.join(globals.miyamoto_path, 'yaz0data', 'sprites', imgname)
 
     for folder in reversed(SpritesFolders): # find the most recent copy
         tryPath = folder + '/' + imgname

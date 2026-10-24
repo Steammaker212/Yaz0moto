@@ -2162,7 +2162,7 @@ class paletteWidget(QtWidgets.QWidget):
         super(paletteWidget, self).__init__(parent)
         self.editor = editor
 
-        path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'Icons', '')
+        path = os.path.join(globals.miyamoto_path, 'yaz0data', 'Icons', '')
 
         self.coreTypes = [
             ['Default', QtGui.QIcon(path + 'Core/Default.png'), 'The standard type for tiles.\n\nAny regular terrain or backgrounds\nshould be of this generic type.'],
@@ -3438,7 +3438,7 @@ class tileOverlord(QtWidgets.QWidget):
         slopePanelLyt = QtWidgets.QVBoxLayout(slopePanel)
         slopePanelLyt.setContentsMargins(0, 0, 0, 0)
 
-        path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'Icons', '')
+        path = os.path.join(globals.miyamoto_path, 'yaz0data', 'Icons', '')
         slopeItems = [
             ['Upward slope',        QtGui.QIcon(path + 'Slope/steepslopeleft.png'), 'Floor rises going left to right'],
             ['Downward slope',      QtGui.QIcon(path + 'Slope/steepsloperight.png'), 'Floor falls going left to right'],
@@ -4818,7 +4818,7 @@ class animWidget(QtWidgets.QWidget):
         self.animations = (self.block, self.hatena, self.blockL, self.hatenaL, self.tuka, self.belt)
         self.tabs = QtWidgets.QTabWidget()
 
-        path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'Icons', '')
+        path = os.path.join(globals.miyamoto_path, 'yaz0data', 'Icons', '')
 
         self.tabs.addTab(self.block, QtGui.QIcon(path + 'Core/Brick.png'), 'Brick Block')
         self.tabs.addTab(self.hatena, QtGui.QIcon(path + 'Core/Qblock.png'), '? Block')

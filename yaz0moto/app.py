@@ -70,14 +70,17 @@ from . import globals
 
 # Check if Cython is available
 try:
-    import pyximport
-    pyximport.install()
+    # Frozen builds ship these modules precompiled (see build.py) and have no
+    # compiler, so pyximport is only for running from source
+    if not getattr(sys, 'frozen', False):
+        import pyximport
+        pyximport.install()
 
     import cython_available
 
 except:
     print("Cython is not available!")
-    print("Expect Miyamoto to be very slow!\n")
+    print("Expect Yaz0moto to be very slow!\n")
 
 else:
     del cython_available
@@ -245,15 +248,17 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         _base_title = 'Yaz0moto Nightly' if globals.MiyamotoReleaseType == 'nightly' else 'Yaz0moto'
         self.setWindowTitle(_base_title)
         _icon_name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
-        self.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', _icon_name)))
+        self.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'yaz0data', 'app_icons', _icon_name)))
         self.setIconSize(QtCore.QSize(16, 16))
         self.setUnifiedTitleAndToolBarOnMac(True)
 
         # create the level view
         self.scene = LevelScene(0, 0, 1024 * globals.TileWidth, 512 * globals.TileWidth, self)
         self.scene.setItemIndexMethod(QtWidgets.QGraphicsScene.NoIndex)
-        # While True, selecting doesn't open the properties panel (drag-selecting, right-clicking)
+        # While True, selecting doesn't open the properties panel (placing actors, drag-selecting, right-clicking)
         self.quietSelection = False
+        # True while closing to restart (RestartEditor)
+        self._restarting = False
         self.scene.selectionChanged.connect(self.ChangeSelectionHandler)
 
         # Esc closes the window in front (but never this one)
@@ -288,9 +293,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
 
         try:
+            self.AutosaveToast = ToastPopup(self)
             self.AutosaveTimer = QtCore.QTimer()
-            self.AutosaveTimer.timeout.connect(self.Autosave)
-            self.AutosaveTimer.start(20000)
+            self.AutosaveTimer.timeout.connect(lambda: self.Autosave(notify=True))
+            self.AutosaveTimer.start(60000)
 
         except TypeError:
             pass
@@ -1639,28 +1645,97 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         folder = os.path.join(globals.user_data_path, 'autosave')
         return folder, os.path.join(folder, 'level.bin'), os.path.join(folder, 'level.json')
 
-    def Autosave(self):
+    def Autosave(self, notify=False):
         """
-        Keeps a recovery copy of the level (every 20 seconds while it has unsaved
+        Keeps a recovery copy of the level (every minute while it has unsaved
         changes) in the user data folder; it is offered at the next start if Yaz0moto
         didn't close normally. The level's own file and tilesets are never touched.
+        notify: briefly show "Saved to temporary file" at the bottom left (the timer).
         """
         if not globals.AutoSaveDirty or getattr(globals, 'Level', None) is None or globals.Initializing:
             return
 
-        folder, dataPath, infoPath = self._autosavePaths()
         try:
-            data = globals.Level.save(saveTilesets=False)
-            os.makedirs(folder, exist_ok=True)
-            yaz0.writeFile(dataPath, data)
-            with open(infoPath, 'w', encoding='utf-8') as f:
-                json.dump({'path': self.fileSavePath or None, 'deluxe': bool(globals.IsNSMBUDX)}, f)
+            self._writeRecoveryCopy()
         except Exception as e:
             # For example a sprite outside every zone; try again on the next tick
             print('Autosave skipped: %r' % e)
             return
 
         globals.AutoSaveDirty = False
+        if notify:
+            self.AutosaveToast.showMessage('Saved to temporary file')
+
+    def _writeRecoveryCopy(self, **info):
+        """Writes the level (without touching its tilesets) and its info to the recovery files."""
+        folder, dataPath, infoPath = self._autosavePaths()
+        data = globals.Level.save(saveTilesets=False)
+        os.makedirs(folder, exist_ok=True)
+        yaz0.writeFile(dataPath, data)
+        with open(infoPath, 'w', encoding='utf-8') as f:
+            json.dump(dict({'path': self.fileSavePath or None, 'deluxe': bool(globals.IsNSMBUDX)}, **info), f)
+
+    def RestartEditor(self):
+        """
+        Restarts Yaz0moto to apply a theme, style or game/mod change. The open level is
+        written to the recovery files and opened again at once by the new instance
+        (RestoreAutosave), keeping its file path and whether it had unsaved changes.
+        Returns False if the restart was put off.
+        """
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle('Restart Yaz0moto')
+        msg.setText('Yaz0moto needs to restart to apply this change.')
+        details = 'The level opens again as it is, but the undo history starts over.'
+        restartText = 'Restart Now (Lose track of changes)'
+        if globals.TilesetEdited:
+            # Edited tilesets are only written by a real save (for Deluxe, into the game's
+            # Unit folder), so the recovery copy can't carry them across the restart
+            details += ("\n\nYour tileset changes aren't saved yet and can't be kept across the "
+                        'restart, so the level and its tilesets are saved first.')
+            restartText = 'Save and ' + restartText
+        msg.setInformativeText(details)
+        restart = msg.addButton(restartText, QtWidgets.QMessageBox.AcceptRole)
+        msg.addButton('Restart Later', QtWidgets.QMessageBox.RejectRole)
+        msg.setDefaultButton(restart)
+        msg.exec_()
+        if msg.clickedButton() is not restart:
+            return False
+        if globals.TilesetEdited and not self.HandleSave():
+            return False
+
+        if getattr(globals, 'Level', None) is not None:
+            try:
+                self._writeRecoveryCopy(restart=True, dirty=bool(globals.Dirty), area=globals.CurrentArea)
+            except Exception as e:
+                # The level can't be written as it is (e.g. a sprite outside every zone)
+                QtWidgets.QMessageBox.warning(
+                    self, 'Restart Yaz0moto',
+                    "Yaz0moto needs to restart to apply this change, but the level couldn't be kept "
+                    'open across the restart:\n%s\n\nRestart Yaz0moto yourself after saving.' % e)
+                return False
+
+        self.AutosaveTimer.stop()
+        self._restarting = True
+        if not self.close():
+            self._restarting = False
+            self.AutosaveTimer.start(60000)
+            return False
+        subprocess.Popen(self._launchCommand())
+        QtWidgets.QApplication.quit()
+        return True
+
+    @staticmethod
+    def _launchCommand():
+        """The command that starts another Yaz0moto (from source, built, or the AppImage)."""
+        if os.environ.get('APPIMAGE'):
+            # The AppImage's mount goes away when this instance closes, so start
+            # the new one from the AppImage file rather than from inside the mount
+            return [os.environ['APPIMAGE']]
+        if getattr(sys, 'frozen', False):
+            # Built app: sys.executable is Yaz0moto itself, there's no script to pass
+            return [sys.executable]
+        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'main.py')
+        return [sys.executable, script_path]
 
     def ClearAutosave(self):
         """
@@ -1674,8 +1749,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def RestoreAutosave(self):
         """
-        At startup: if a recovery copy was left behind, offer to restore it.
-        Returns True if a level was restored.
+        At startup: if a recovery copy was left behind, offer to restore it (or open it
+        right away when RestartEditor left it). Returns True if a level was restored.
         """
         _, dataPath, infoPath = self._autosavePaths()
         if not os.path.isfile(dataPath):
@@ -1687,12 +1762,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         except (OSError, ValueError):
             info = {}
         original = info.get('path')
+        # Left by RestartEditor: open it again straight away, in the area that was open
+        restart = bool(info.get('restart'))
+        area = info.get('area') if restart and info.get('area') in (1, 2, 3, 4) else 1
 
-        if AutoSavedInfoDialog(original or 'None (the level was never saved)').exec_() != QtWidgets.QDialog.Accepted:
+        if not restart and AutoSavedInfoDialog(original or 'None (the level was never saved)').exec_() != QtWidgets.QDialog.Accepted:
             self.ClearAutosave()
             return False
 
-        if not self.LoadLevel(None, dataPath, True, 1, True):
+        if not self.LoadLevel(None, dataPath, True, area, True):
+            if restart:
+                # Offer it like any recovery copy next time instead of retrying silently
+                info.pop('restart', None)
+                with open(infoPath, 'w', encoding='utf-8') as f:
+                    json.dump(info, f)
             return False
 
         # It opened from the recovery copy: point it back at the original file, keep the
@@ -1705,9 +1788,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.RecentMenu.updateActionList()
         if original:
             self.RecentMenu.AddToList(original)
-        SetDirty()
+        if restart and not info.get('dirty'):
+            # It had no unsaved changes before the restart, so there's nothing to recover
+            globals.Dirty = False
+            self.ClearAutosave()
+        else:
+            SetDirty()
+            # Keep the recovery copy until the level is saved (LoadLevel removed it, and
+            # Autosave() would skip writing it while the editor is still starting)
+            try:
+                self._writeRecoveryCopy()
+                globals.AutoSaveDirty = False
+            except Exception as e:
+                print('Autosave skipped: %r' % e)  # the timer tries again
         self.UpdateTitle()
-        self.Autosave()  # keep the recovery copy until the level is saved
         return True
 
     def TrackClipboardUpdates(self):
@@ -3402,34 +3496,42 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         old_mods = setting('LastMods') or []
         if isinstance(old_mods, str):
             old_mods = [old_mods]
+        modsChanged = False
         if new_base != old_base or new_mods != old_mods:
             from . import loading as _loading
             from .gamedefs import IsBaseGameDX
             platformChanges = IsBaseGameDX(new_base) != globals.IsNSMBUDX
 
-            # Wii U and Deluxe levels use different byte orders and tileset storage, so
-            # the open level can't be carried over: confirm, then start a new level.
-            if platformChanges and self.CheckDirty():
-                pass  # cancelled: stay on the current game
-
-            else:
-                _loading.LoadGameDef(new_base, new_mods, dlg=True)
-                if platformChanges:
+            if platformChanges:
+                # Wii U and Deluxe levels use different byte orders and tileset storage, so
+                # the open level can't be carried over: confirm, then start a new level.
+                if not self.CheckDirty():
+                    _loading.LoadGameDef(new_base, new_mods, dlg=True)
                     self.updateOpenByNameState()
                     self.LoadLevel(None, None, False, 1, True)
+
+            else:
+                # Applied by restarting, which keeps the open level (see below)
+                setSetting('LastBaseGame', new_base)
+                setSetting('LastMods', list(new_mods))
+                modsChanged = True
 
             del _loading
 
         # Get the tileset settings
         globals.UseRGBA8 = dlg.tilesetsTab.useRGBA8.isChecked()
         setSetting('UseRGBA8', globals.UseRGBA8)
-        
+
         setSetting('OverrideTilesetSaving', dlg.tilesetsTab.alwaysRepack.isChecked())
         setSetting('AutoSaveTilesets', dlg.tilesetsTab.autoSave.isChecked())
 
-        # Warn the user only if they changed a setting that requires a restart (theme or toolbar)
-        if dlg.needsRestart():
-            QtWidgets.QMessageBox.warning(None, 'Yaz0moto Preferences', 'You may need to restart Yaz0moto for changes to take effect.')
+        # Theme, style, toolbar and mod changes take effect by restarting (after asking); the
+        # open level comes back as it was. If the restart is put off, mods apply right away and
+        # the rest at the next start.
+        if (modsChanged or dlg.needsRestart()) and not self.RestartEditor() and modsChanged:
+            from . import loading as _loading
+            _loading.LoadGameDef(new_base, new_mods, dlg=True)
+            del _loading
 
     def updateOpenByNameState(self):
         """Enable or disable Open Level by Name based on whether any game path exists."""
@@ -3548,13 +3650,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Launches a new instance of Miyamoto with the given file
         """
-        python_exe = sys.executable
-        script_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'yaz0moto.py',
-        )
         try:
-            subprocess.Popen([python_exe, script_path, '-level', filepath])
+            subprocess.Popen(self._launchCommand() + ['-level', filepath])
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", f"Could not launch new window: {str(e)}")
         
@@ -3764,7 +3861,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         if not name or "/" in name or "\\" in name or globals.ModifyInnerName:
             name = QtWidgets.QInputDialog.getText(self, "Choose Internal Name",
                                                   "Choose an internal filename for this level (do not add a .sarc/.szs extension) (example: 1-1):"
-                                                  "\n(To make Miyamoto automatically set the internal filename to the filename of the level file,"
+                                                  "\n(To make Yaz0moto automatically set the internal filename to the filename of the level file,"
                                                   "\nGo to Preferences and uncheck \"Modify Internal Name\".)",
                                                   QtWidgets.QLineEdit.Normal)[0]
 
@@ -4314,7 +4411,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         Handler for the main window close event
         """
 
-        if self.CheckDirty():
+        # A restart already kept the level in the recovery copy, so no "unsaved changes" prompt
+        if not self._restarting and self.CheckDirty():
             event.ignore()
         else:
             # save our state
@@ -4336,16 +4434,18 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
             globals.gamedef.SetLastLevel(str(self.fileSavePath))
 
-            # Closed on purpose, so the recovery copy is no longer needed
-            self.ClearAutosave()
+            # Closed on purpose, so the recovery copy is no longer needed (unless it
+            # carries the level across a restart)
+            if not self._restarting:
+                self.ClearAutosave()
 
             event.accept()
 
     def LoadDefaultTileset(self, name, silent=False, dirty=False):
-        path = globals.miyamoto_path + "/miyamotoextras/%s.szs" % name
+        path = globals.miyamoto_path + "/yaz0extras/%s.szs" % name
         if not os.path.isfile(path):
             if not silent:
-                QtWidgets.QMessageBox.warning(self, 'Warning', '"%s.szs" not found in miyamotoextras!' \
+                QtWidgets.QMessageBox.warning(self, 'Warning', '"%s.szs" not found in yaz0extras!' \
                                                                '\nDid you download the main tilesets pack?' % name,
                                               QtWidgets.QMessageBox.Ok)
 
@@ -5961,11 +6061,6 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         loc.UpdateListItem()
         self.levelOverview.update()
 
-    def ShowSelectionProperties(self):
-        """Opens the properties panel for the current selection (even if it was selected quietly)."""
-        self.quietSelection = False
-        self.ChangeSelectionHandler()
-
     def CloseFrontWindowOnEscape(self, obj):
         """
         Esc closes the window it was pressed in, as its X button would. Returns True if it did.
@@ -7017,7 +7112,7 @@ def main():
 
     # Apply project default preferences on first launch (no existing settings.json)
     if not _settings_existed:
-        _defaults_path = os.path.join(globals.miyamoto_path, 'miyamotodata', 'default_settings.json')
+        _defaults_path = os.path.join(globals.miyamoto_path, 'yaz0data', 'default_settings.json')
         if os.path.isfile(_defaults_path):
             try:
                 with open(_defaults_path, 'r', encoding='utf-8') as _df:
@@ -7099,7 +7194,7 @@ def main():
 
     # Set the default window icon (used for random popups and stuff)
     _icon_name = 'yaz0moto1024mac.png' if platform.system() == 'Darwin' else 'yaz0moto1024.png'
-    globals.app.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'miyamotodata', 'app_icons', _icon_name)))
+    globals.app.setWindowIcon(QtGui.QIcon(os.path.join(globals.miyamoto_path, 'yaz0data', 'app_icons', _icon_name)))
     globals.app.setApplicationDisplayName('Yaz0moto')
 
     gt = setting('GridType')

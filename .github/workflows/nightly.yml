@@ -4,7 +4,7 @@ on:
   push:
     branches: [deluxe-support]
     paths:
-      - 'miyamoto/**'
+      - 'yaz0moto/**'
       - '*.py'
       - '**/*.py'
       - '**/*.pyx'
@@ -43,14 +43,14 @@ jobs:
           import sys, os
           errors = []
           try:
-              from miyamoto.globals import MiyamotoVersion
-              print(f"  OK  miyamoto.globals  ->  v{MiyamotoVersion}")
+              from yaz0moto.globals import MiyamotoVersion
+              print(f"  OK  yaz0moto.globals  ->  v{MiyamotoVersion}")
           except Exception as e:
-              errors.append(f"miyamoto.globals import failed: {e}")
-          if not os.path.isfile("yaz0moto.py"):
-              errors.append("yaz0moto.py entry point is missing")
+              errors.append(f"yaz0moto.globals import failed: {e}")
+          if not os.path.isfile("main.py"):
+              errors.append("main.py entry point is missing")
           else:
-              print("  OK  yaz0moto.py exists")
+              print("  OK  main.py exists")
           with open("build.py") as f:
               src = f.read()
           if "from globals import" in src:

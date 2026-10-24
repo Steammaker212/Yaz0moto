@@ -7,7 +7,7 @@
     <file name="spritelistdata"   path="spritelistdata.txt"   patch="false" />
     <file name="spriteresources"  path="spriteresources.xml"  patch="false" />
 
-    <!-- Global data moved from miyamotodata root -->
+    <!-- Global data moved from yaz0data root -->
     <file name="bg"              path="bg.xml"              patch="true" />
     <file name="blankcourse"     path="blankcourse.bin"     patch="true" />
     <file name="entrances"       path="entrances.png"       patch="true" />

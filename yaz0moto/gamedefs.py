@@ -30,14 +30,14 @@ def _mod_root(folder_name):
     _user = os.path.join(globals.user_data_path, 'patches', folder_name)
     if os.path.isfile(os.path.join(_user, 'main.xml')):
         return os.path.join(globals.user_data_path, 'patches')
-    return os.path.join(globals.miyamoto_path, 'miyamotodata', 'patches')
+    return os.path.join(globals.miyamoto_path, 'yaz0data', 'patches')
 
 
 class MiyamotoGameDefinition:
     """
     A class that defines a NSMBU game or mod: songs, tilesets, sprites, etc.
-    source='game' → loaded from miyamotodata/games/
-    source='mod'  → loaded from miyamotodata/patches/ or userdata/patches/
+    source='game' → loaded from yaz0data/games/
+    source='mod'  → loaded from yaz0data/patches/ or userdata/patches/
     """
 
     class GameDefinitionFile:
@@ -115,7 +115,7 @@ class MiyamotoGameDefinition:
         self.gamepath = name
 
         if source == 'game':
-            _root = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games')
+            _root = os.path.join(globals.miyamoto_path, 'yaz0data', 'games')
         else:
             _root = _mod_root(name)
 
@@ -162,12 +162,12 @@ class MiyamotoGameDefinition:
                         ref_def = FindGameDef(game_attr, name)
                         if ref_def is not None:
                             if ref_def.source == 'game':
-                                ref_root = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games')
+                                ref_root = os.path.join(globals.miyamoto_path, 'yaz0data', 'games')
                             else:
                                 ref_root = _mod_root(ref_def.gamepath)
                             fpath = os.path.join(ref_root, ref_def.gamepath, node.attrib['path'])
                     else:
-                        fpath = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games', 'NSMBU', node.attrib['path'])
+                        fpath = os.path.join(globals.miyamoto_path, 'yaz0data', 'games', 'NSMBU', node.attrib['path'])
 
                 target = self.files if n == 'file' else self.folders
                 target[node.attrib['name']] = self.GameDefinitionFile(fpath, patch)
@@ -462,7 +462,7 @@ def getMusic():
 def FindGameDef(name, skip=None):
     """Find a gamedef by its display name, searching games/ then patches/."""
     # Search base games
-    _games = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games')
+    _games = os.path.join(globals.miyamoto_path, 'yaz0data', 'games')
     if os.path.isdir(_games):
         for folder in os.listdir(_games):
             if folder == skip:
@@ -481,7 +481,7 @@ def FindGameDef(name, skip=None):
                 return def_
 
     # Search bundled mods
-    _patches = os.path.join(globals.miyamoto_path, 'miyamotodata', 'patches')
+    _patches = os.path.join(globals.miyamoto_path, 'yaz0data', 'patches')
     if os.path.isdir(_patches):
         for folder in os.listdir(_patches):
             if folder == skip:
@@ -522,7 +522,7 @@ def FindGameDef(name, skip=None):
 
 
 def IsBaseGameDX(folder):
-    """True if the base game in miyamotodata/games/<folder> is the Switch (Deluxe) version."""
+    """True if the base game in yaz0data/games/<folder> is the Switch (Deluxe) version."""
     try:
         return bool(MiyamotoGameDefinition(folder, source='game').isDX)
     except Exception:
@@ -532,7 +532,7 @@ def IsBaseGameDX(folder):
 def getAvailableBaseGames():
     """Return list of (MiyamotoGameDefinition, folder_name) for all base games, sorted by name."""
     games = []
-    _dir = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games')
+    _dir = os.path.join(globals.miyamoto_path, 'yaz0data', 'games')
     if not os.path.isdir(_dir):
         return games
     for folder in sorted(os.listdir(_dir)):
@@ -599,13 +599,13 @@ def getAvailableMods():
 
     # Collect base game folder names so we can skip them in the mods list
     _base_game_names = set()
-    _games_dir = os.path.join(globals.miyamoto_path, 'miyamotodata', 'games')
+    _games_dir = os.path.join(globals.miyamoto_path, 'yaz0data', 'games')
     if os.path.isdir(_games_dir):
         _base_game_names = {f for f in os.listdir(_games_dir)
                             if os.path.isdir(os.path.join(_games_dir, f))}
 
     # Bundled mods first
-    _patches = os.path.join(globals.miyamoto_path, 'miyamotodata', 'patches')
+    _patches = os.path.join(globals.miyamoto_path, 'yaz0data', 'patches')
     if os.path.isdir(_patches):
         for folder in os.listdir(_patches):
             result = _load_mod_entry(folder, _patches, 'mod', _base_game_names)

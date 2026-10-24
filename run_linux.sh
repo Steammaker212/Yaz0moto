@@ -1,1 +1,1 @@
-QT_QPA_PLATFORM=xcb python ./miyamoto.py
+QT_QPA_PLATFORM=xcb python ./main.py
