@@ -40,10 +40,20 @@ def LoadTheme():
     """
     Loads the theme
     """
+    # The Yaz0moto theme became the default look in this version: switch to it once,
+    # after which the choice in Preferences > Themes is kept
+    if not setting('Yaz0motoThemeIntroduced', False):
+        setSetting('Theme', 'Yaz0moto')
+        setSetting('Yaz0motoThemeIntroduced', True)
+
     id = setting('Theme')
-    if id is None: id = 'Classic'
+    if id is None: id = 'Yaz0moto'
     print('THEME ID: ' + str(id))
-    globals.theme = MiyamotoTheme(id)
+    try:
+        globals.theme = MiyamotoTheme(id)
+    except (OSError, ValueError, etree.ParseError) as e:
+        print('Could not load the theme %r (%s); using Classic.' % (id, e))
+        globals.theme = MiyamotoTheme()
 
 
 def LoadBGNames():
@@ -866,9 +876,13 @@ def LoadActionsLists():
         ('Show Actors', True, 'showsprites'),
         ('Show Actor Images', False, 'showspriteimages'),
         ('Preview Pivotal Rotation', True, 'showrotation'),
+        ('Preview All Movement', False, 'previewallmovement'),
         ('Show Locations', True, 'showlocations'),
         ('Show Paths', True, 'showpaths'),
         ('Switch\nGrid', True, 'grid'),
+        ('Real View', True, 'realview'),
+        ('Live Background', True, 'livebg'),
+        ('Animate Live Background', True, 'livebganim'),
         ('Zoom to Maximum', True, 'zoommax'),
         ('Zoom In', True, 'zoomin'),
         ('Zoom 100%', True, 'zoomactual'),

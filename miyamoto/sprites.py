@@ -1552,7 +1552,7 @@ class SpriteImage_QBlock(SLib.SpriteImage_StaticMultiple):  # 59
 
         if self.dopaint:
             painter.setRenderHint(QtGui.QPainter.Antialiasing)
-            painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[self.tilenum].main)
+            painter.drawPixmap(0, 0, SLib.Tiles[self.tilenum].main)
 
 
 class SpriteImage_BrickBlock(SLib.SpriteImage_StaticMultiple):  # 60
@@ -1600,7 +1600,7 @@ class SpriteImage_BrickBlock(SLib.SpriteImage_StaticMultiple):  # 60
 
         if self.dopaint:
             painter.setRenderHint(QtGui.QPainter.Antialiasing)
-            painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[self.tilenum].main)
+            painter.drawPixmap(0, 0, SLib.Tiles[self.tilenum].main)
 
 
 class SpriteImage_InvisiBlock(SLib.SpriteImage_StaticMultiple):  # 61
@@ -1726,7 +1726,7 @@ class SpriteImage_Coin(SLib.SpriteImage_Static):  # 65
         super().paint(painter)
 
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[30].main)
+        painter.drawPixmap(0, 0, SLib.Tiles[30].main)
 
 
 class SpriteImage_Swooper(SLib.SpriteImage_StaticMultiple):  # 67
@@ -7955,7 +7955,7 @@ class SpriteImage_StoneBlock(SLib.SpriteImage_Static):  # 347
         super().paint(painter)
 
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[52].main)
+        painter.drawPixmap(0, 0, SLib.Tiles[52].main)
 
 
 class SpriteImage_SuperGuide(SLib.SpriteImage_Static):  # 348
@@ -11198,7 +11198,7 @@ class SpriteImage_SteelBlock(SLib.SpriteImage_Static):  # 618
         super().paint(painter)
 
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[54].main)
+        painter.drawPixmap(0, 0, SLib.Tiles[54].main)
 
 
 class SpriteImage_WoodBlock(SLib.SpriteImage_Static):  # 619
@@ -11212,7 +11212,7 @@ class SpriteImage_WoodBlock(SLib.SpriteImage_Static):  # 619
         super().paint(painter)
 
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        painter.drawPixmap(QtCore.QPointF(self.yOffset, self.xOffset), SLib.Tiles[51].main)
+        painter.drawPixmap(0, 0, SLib.Tiles[51].main)
 
 
 class SpriteImage_SeesawMushroomBlue(SLib.SpriteImage):  # 632
@@ -12441,49 +12441,49 @@ class SpriteImage_CoinSnake(SLib.SpriteImage_StaticMultiple):  # 522
                         if qblType <= 1:
                             for i in range(self.w):
                                 self.updateSize()
-                                painter.drawTiledPixmap((i + 1.75) * 120, 30, 60, 60, ImageCache['coin'])
+                                painter.drawTiledPixmap(round((i + 1.75) * 120), 30, 60, 60, ImageCache['coin'])
                         elif qblType == 2:
                             for j in range(self.w):
                                 self.updateSize()
                                 if j == 0:
                                     self.image = ImageCache['coin']
                                 elif j == (self.w) - 1:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['qbl{0}'.format(qblCts)])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['qbl{0}'.format(qblCts)])
                                 else:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['coin'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['coin'])
                         elif qblType == 3:
                             for j in range(self.w):
                                 self.updateSize()
                                 if j == 0:
                                     self.image = ImageCache['coin']
                                 elif j % 3 == 0:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
                                 else:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['coin'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['coin'])
                         elif qblType == 4:
                             for j in range(self.w):
                                 self.updateSize()
                                 if j == 0:
                                     self.image = ImageCache['coin']
                                 elif j % 4 == 0:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
                                 else:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['coin'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['coin'])
                         else:
                             for j in range(self.w):
                                 self.updateSize()
                                 if j == 0:
                                     self.image = ImageCache['coin']
                                 elif j % 5 == 0:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['qbl1'])
                                 else:
-                                    painter.drawTiledPixmap((j+.75) * 120, (stcType!=0)*30, 60, 60, ImageCache['coin'])
+                                    painter.drawTiledPixmap(round((j+.75) * 120), (stcType!=0)*30, 60, 60, ImageCache['coin'])
                 elif stcType == 2:
                     for i in range(self.w):
                         self.updateSize()
                         self.offset = (-8, -16)
                         if i == self.w - 1:
-                            painter.drawTiledPixmap((i + .25) * 120, 0, 120, 120, ImageCache['starcoin'])
+                            painter.drawTiledPixmap(round((i + .25) * 120), 0, 120, 120, ImageCache['starcoin'])
                     else:
                         if qblType == 0:
                             for i in range(self.w):
@@ -12549,7 +12549,7 @@ class SpriteImage_CoinSnake(SLib.SpriteImage_StaticMultiple):  # 522
                         self.updateSize()
                         self.offset = (-8, -16)
                         if i == self.w - 1:
-                            painter.drawTiledPixmap((i - 0.25) * 120, 0, 120, 120, ImageCache['starcoin'])
+                            painter.drawTiledPixmap(round((i - 0.25) * 120), 0, 120, 120, ImageCache['starcoin'])
                     else:
                         if qblType == 0:
                             for i in range(self.w):

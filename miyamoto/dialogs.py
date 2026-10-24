@@ -32,7 +32,7 @@ from . import globals
 from .items import ZoneItem
 from .misc import HexSpinBox, BGName, setting, setSetting, hasLevelNameSources
 from .updater import _CHANNEL_LABELS, _CHANNEL_VALUES, _default_channel, check_for_updates_now
-from .ui import MiyamotoTheme, availableThemes, toQColor, GetIcon, createHorzLine
+from .ui import MiyamotoTheme, availableThemes, toQColor, GetIcon, createHorzLine, TOOLBAR_ICON_SIZES, toolbarIconSize
 from .widgets import LoadingTab, TilesetsTab
 from .verifications import SetDirty
 
@@ -96,17 +96,11 @@ class AboutDialog(QtWidgets.QDialog):
         layout.setContentsMargins(36, 28, 36, 20)
         layout.setSpacing(0)
 
-        # Logo
+        # Logo (click the star!)
         if os.path.isfile(icon_path):
-            logo = QtWidgets.QLabel()
-            logo.setAlignment(Qt.AlignHCenter)
-            dpr = QtWidgets.QApplication.instance().devicePixelRatio()
-            physical = int(108 * dpr)
-            pix = QtGui.QPixmap(icon_path).scaled(physical, physical, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            pix.setDevicePixelRatio(dpr)
-            logo.setPixmap(pix)
-            logo.setFixedHeight(108)
-            layout.addWidget(logo)
+            from .welcomestar import AnimatedStarLogo
+            self.logo = AnimatedStarLogo(icon_path, 108)
+            layout.addWidget(self.logo, 0, Qt.AlignHCenter)
             layout.addSpacing(14)
 
         # Heading
@@ -2034,7 +2028,7 @@ class PreferencesDialog(QtWidgets.QDialog):
 
                 self.placeFullSize = QtWidgets.QCheckBox('Place objects at their full size')
                 self.placeFullSize.setToolTip(
-                    'When enabled, right-clicking to place an object in the level canvas places it '
+                    'When enabled, clicking to place an object in the level canvas places it '
                     'at its full width and height instead of as a 1×1 tile.')
                 self.placeFullSize.setChecked(globals.PlaceObjectFullSize)
 
@@ -2128,6 +2122,8 @@ class PreferencesDialog(QtWidgets.QDialog):
             'showsprites': 'sprites', 'showspriteimages': 'sprites',
             'showrotation': 'rotation', 'showlocations': 'locations',
             'showpaths': 'paths', 'grid': 'grid',
+            'livebg': 'background', 'livebganim': 'livebganim', 'realview': 'realview',
+            'previewallmovement': 'animation',
             'zoommax': 'zoommax', 'zoomin': 'zoomin', 'zoomactual': 'zoomactual',
             'zoomout': 'zoomout', 'zoommin': 'zoommin',
             'areaoptions': 'area', 'zones': 'zones',
@@ -2203,10 +2199,8 @@ class PreferencesDialog(QtWidgets.QDialog):
                             box.setIcon(GetIcon(icon_name))
                         boxes.append(box)
                         layout.addWidget(box)
-                        try:
-                            box.setChecked(toggled[I])
-                        except KeyError:
-                            pass
+                        # Buttons added after the settings were saved start at their default
+                        box.setChecked(toggled.get(I, C))
                         box.InternalName = I  # to save settings later
                     group.setLayout(layout)
 
@@ -3413,9 +3407,14 @@ class PreferencesDialog(QtWidgets.QDialog):
 
                 self.themeBox.currentIndexChanged.connect(self.UpdatePreview)
 
+                createButton = QtWidgets.QPushButton('Create Theme...')
+                createButton.setToolTip('Make your own theme: choose an accent colour, background, text colour and roundness.')
+                createButton.clicked.connect(self.openThemeEditor)
+
                 boxGB = QtWidgets.QGroupBox('Themes')
                 L = QtWidgets.QFormLayout()
                 L.addRow('Theme:', self.themeBox)
+                L.addRow('', createButton)
                 L2 = QtWidgets.QGridLayout()
                 L2.addLayout(L, 0, 0)
                 boxGB.setLayout(L2)
@@ -3447,9 +3446,16 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self.uiScale.setValue(float(setting('UIScale', 1.0)) * 100)
                 self.uiScale.setToolTip('<b>UI Scale</b><br>Adjusts the overall size of the interface.<br>Requires a restart to take effect.')
 
+                # Create the toolbar icon size option
+                self.toolbarIconSize = QtWidgets.QComboBox()
+                for size, label in zip(TOOLBAR_ICON_SIZES, ('Small', 'Compact', 'Normal', 'Large', 'Huge')):
+                    self.toolbarIconSize.addItem('%s (%d px)' % (label, size), size)
+                self.toolbarIconSize.setCurrentIndex(TOOLBAR_ICON_SIZES.index(toolbarIconSize()))
+
                 # Create the options groupbox
                 L = QtWidgets.QFormLayout()
                 L.addRow('UI Scale:', self.uiScale)
+                L.addRow('Toolbar icons:', self.toolbarIconSize)
                 L.addRow(self.NonWinStyle)
                 optionsGB = QtWidgets.QGroupBox('Options')
                 optionsGB.setLayout(L)
@@ -3468,6 +3474,23 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self._initial_theme = self.themeBox.currentText()
                 self._initial_style = self.NonWinStyle.currentText()
                 self._initial_ui_scale = self.uiScale.value()
+
+            def openThemeEditor(self):
+                """Create a theme (starting from the selected one) and select it."""
+                from .themeeditor import ThemeEditorDialog
+                dlg = ThemeEditorDialog(self.themeBox.currentText(), self)
+                if dlg.exec_() != QtWidgets.QDialog.Accepted or not dlg.savedName:
+                    return
+                self.themes = self.getAvailableThemes
+                self.themeBox.blockSignals(True)
+                self.themeBox.clear()
+                for name, themeObj in self.themes:
+                    self.themeBox.addItem(name)
+                self.themeBox.blockSignals(False)
+                index = self.themeBox.findText(dlg.savedName, Qt.MatchFixedString)
+                if index >= 0:
+                    self.themeBox.setCurrentIndex(index)
+                self.UpdatePreview()
 
             @property
             def getAvailableThemes(self):
@@ -3820,17 +3843,11 @@ class WelcomeDialog(QtWidgets.QDialog):
         layout.setContentsMargins(36, 28, 36, 20)
         layout.setSpacing(0)
 
-        # Logo
+        # Logo (click the star!)
         if os.path.isfile(icon_path):
-            logo = QtWidgets.QLabel()
-            logo.setAlignment(Qt.AlignHCenter)
-            dpr = QtWidgets.QApplication.instance().devicePixelRatio()
-            physical = int(108 * dpr)
-            pix = QtGui.QPixmap(icon_path).scaled(physical, physical, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            pix.setDevicePixelRatio(dpr)
-            logo.setPixmap(pix)
-            logo.setFixedHeight(108)
-            layout.addWidget(logo)
+            from .welcomestar import AnimatedStarLogo
+            self.logo = AnimatedStarLogo(icon_path, 108)
+            layout.addWidget(self.logo, 0, Qt.AlignHCenter)
             layout.addSpacing(14)
 
         # Heading

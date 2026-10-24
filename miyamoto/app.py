@@ -102,6 +102,8 @@ from . import spritelib as SLib
 from . import sprites
 from .tileset import *
 from .ui import *
+from . import movementpreview
+from . import partsbar
 from . import undomanager
 from .undomanager import UndoManager
 from .verifications import *
@@ -250,7 +252,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # create the level view
         self.scene = LevelScene(0, 0, 1024 * globals.TileWidth, 512 * globals.TileWidth, self)
         self.scene.setItemIndexMethod(QtWidgets.QGraphicsScene.NoIndex)
+        # While True, selecting doesn't open the properties panel (drag-selecting, right-clicking)
+        self.quietSelection = False
         self.scene.selectionChanged.connect(self.ChangeSelectionHandler)
+
+        # Esc closes the window in front (but never this one)
+        QtWidgets.QApplication.instance().installEventFilter(self)
 
         self.view = LevelViewWidget(self.scene, self)
         self.view.centerOn(0, 0)  # this scrolls to the top left
@@ -290,6 +297,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         # set up actions and menus
         self.SetupActionsAndMenus()
+        movementpreview.listeners.append(self._syncPreviewAllAction)
 
         # set up the status bar
         self.posLabel = QtWidgets.QLabel()
@@ -323,7 +331,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         _from_welcome = False
 
         try:
-            if '-level' in sys.argv:
+            if self.RestoreAutosave():
+                loaded = True
+
+            elif '-level' in sys.argv:
                 index = sys.argv.index('-level')
                 try:
                     fn = sys.argv[index + 1]
@@ -408,6 +419,24 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             self.restoreGeometry(setting('MainWindowGeometry'))
         if globals.settings.contains('MainWindowState'):
             self.restoreState(setting('MainWindowState'), 0)
+        self.PlacePartsBar()
+
+    def PlacePartsBar(self):
+        """
+        Keeps the parts bar on its own row under the main toolbar, so it has room for its
+        parts (a saved window layout could otherwise put it beside the toolbar)
+        """
+        bar = self.partsBar
+        if (self.toolBarArea(bar) == Qt.TopToolBarArea and self.toolBarBreak(bar)
+                and self.toolBarArea(self.toolbar) == Qt.TopToolBarArea):
+            return
+        visible = not bar.isHidden()
+        self.removeToolBar(bar)
+        self.addToolBar(Qt.TopToolBarArea, self.toolbar)
+        self.addToolBarBreak(Qt.TopToolBarArea)
+        self.addToolBar(Qt.TopToolBarArea, bar)
+        self.toolbar.show()
+        bar.setVisible(visible)
 
     def SetupActionsAndMenus(self):
         """
@@ -693,13 +722,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtGui.QKeySequence('Ctrl+9'), True,
         )
         self.CreateAction(
-            'livebg', self.HandleLiveBackgroundToggle, None,
+            'livebg', self.HandleLiveBackgroundToggle, GetIcon('background'),
             'Live Background (Deluxe)',
             'Show each zone\'s background model behind the view, as the game would with the screen there',
             None, True,
         )
         self.CreateAction(
-            'livebganim', self.HandleLiveBackgroundAnimToggle, None,
+            'livebganim', self.HandleLiveBackgroundAnimToggle, GetIcon('livebganim'),
             'Animate Live Background',
             'Play the background models\' animations (needs OpenGL)',
             None, True,
@@ -855,6 +884,34 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             None,
         )
 
+        self.CreateAction(
+            'previewallmovement', self.HandlePreviewAllMovement, GetIcon('animation'),
+            'Preview All Movement',
+            'Animate every actor attached to a movement controller in this area (the actor panel sets the speed)',
+            QtGui.QKeySequence('Ctrl+Shift+M'), True,
+        )
+
+        self.CreateAction(
+            'exportalltilesets', self.HandleExportAllTilesets, GetIcon('saveas'),
+            'Export All Tilesets...',
+            'Save a copy of every tileset this level uses into a folder',
+            None,
+        )
+
+        self.CreateAction(
+            'checklevel', self.HandleCheckLevel, GetIcon('diagnostics'),
+            'Check Level...',
+            'Look for common level design mistakes and compare the level with the original courses',
+            QtGui.QKeySequence('Ctrl+Shift+K'),
+        )
+
+        self.CreateAction(
+            'exportmod', self.HandleExportMod, GetIcon('saveas'),
+            'Export Mod Package...',
+            'Save the level and the files it needs as a .zip laid out like the game\'s folders',
+            None,
+        )
+
         # Help actions are created later
 
         # Help actions are created later
@@ -902,6 +959,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         fmenu.addAction(self.actions['save'])
         fmenu.addAction(self.actions['saveas'])
         fmenu.addAction(self.actions['metainfo'])
+        fmenu.addAction(self.actions['exportmod'])
         fmenu.addSeparator()
         fmenu.addAction(self.actions['screenshot'])
         fmenu.addAction(self.actions['showdatafolder'])
@@ -950,6 +1008,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         vmenu.addAction(self.actions['showsprites'])
         vmenu.addAction(self.actions['showspriteimages'])
         vmenu.addAction(self.actions['showrotation'])
+        vmenu.addAction(self.actions['previewallmovement'])
+        vmenu.addMenu(movementpreview.options_menu(vmenu, 'Movement Preview Options'))
         vmenu.addAction(self.actions['showlocations'])
         vmenu.addAction(self.actions['showcomments'])
         vmenu.addAction(self.actions['showpaths'])
@@ -978,6 +1038,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         lmenu.addAction(self.actions['reloaddata'])
         lmenu.addAction(self.actions['viewspritemap'])
         lmenu.addAction(self.actions['edittilesets'])
+        lmenu.addAction(self.actions['exportalltilesets'])
+        lmenu.addSeparator()
+        lmenu.addAction(self.actions['checklevel'])
 
         hmenu = menubar.addMenu('&Help')
         self.SetupHelpMenu(hmenu)
@@ -985,6 +1048,17 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # create a toolbar
         self.toolbar = self.addToolBar('Editor Toolbar')
         self.toolbar.setObjectName('MainToolbar')
+        self.toolbar.setIconSize(QtCore.QSize(*(2 * [toolbarIconSize()])))
+
+        # The Mario Maker style parts bar, on its own row under the toolbar
+        self.addToolBarBreak()
+        self.partsBar = partsbar.PartsBar(self)
+        self.addToolBar(self.partsBar)
+        act = self.partsBar.toggleViewAction()
+        act.setText('Parts Bar')
+        act.setIcon(GetIcon('parts'))
+        act.setStatusTip('Show or hide the bar of recent parts')
+        self.vmenu.addAction(act)
 
         # Add buttons to the toolbar
         self.addToolbarButtons()
@@ -1066,6 +1140,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             ), (
                 'grid',
             ), (
+                'realview',
+                'livebg',
+                'livebganim',
+            ), (
                 'showlay0',
                 'showlay1',
                 'showlay2',
@@ -1073,6 +1151,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 'showsprites',
                 'showspriteimages',
                 'showrotation',
+                'previewallmovement',
                 'showlocations',
                 'showpaths',
             ), (
@@ -1091,19 +1170,15 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             ),
         )
 
-        # Determine which keys are activated
-        if setting('ToolbarActs') is None:
-            # Get the default settings
-            toggled = {}
-            for List in (globals.FileActions, globals.EditActions, globals.ViewActions, globals.SettingsActions, globals.SpritedataActions, globals.HelpActions):
-                for name, activated, key in List:
-                    toggled[key] = activated
-        else:  # Get the registry settings
-            toggled = setting('ToolbarActs')
-            newToggled = {}  # here, I'm replacing QStrings w/ python strings
-            for key in toggled:
-                newToggled[str(key)] = toggled[key]
-            toggled = newToggled
+        # Determine which keys are activated: the defaults, then the saved settings on
+        # top (buttons added after the settings were saved keep their default)
+        toggled = {}
+        for List in (globals.FileActions, globals.EditActions, globals.ViewActions, globals.SettingsActions, globals.SpritedataActions, globals.HelpActions):
+            for name, activated, key in List:
+                toggled[key] = activated
+        if isinstance(setting('ToolbarActs'), dict):
+            for key, value in setting('ToolbarActs').items():
+                toggled[str(key)] = value
 
         # Add each to the toolbar if toggled[key]
         for group in Groups:
@@ -1141,6 +1216,21 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         act.setStatusTip('Show or hide the Level Overview window')
         self.vmenu.addAction(act)
 
+        # undo history
+        dock = QtWidgets.QDockWidget('Undo History', self)
+        dock.setFeatures(
+            QtWidgets.QDockWidget.DockWidgetMovable | QtWidgets.QDockWidget.DockWidgetFloatable | QtWidgets.QDockWidget.DockWidgetClosable)
+        dock.setObjectName('undohistory')  # needed for the state to save/restore correctly
+        dock.setWidget(UndoHistoryWidget())
+        self.undoHistoryDock = dock
+
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.setVisible(False)
+        act = dock.toggleViewAction()
+        act.setIcon(GetIcon('undo'))
+        act.setStatusTip('Show or hide the Undo History window')
+        self.vmenu.addAction(act)
+
 
         # All "Selected X Properties" editors share a single dock so they remember
         # one position. PropEditorStack swaps the active editor; the dock title
@@ -1167,7 +1257,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         dock.setFocusPolicy(Qt.NoFocus)
         dock.setAttribute(Qt.WA_ShowWithoutActivating)
         dock.setVisible(False)
-        dock.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable | QtWidgets.QDockWidget.DockWidgetFloatable)
+        # Closable: selecting something shows it again
+        dock.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable | QtWidgets.QDockWidget.DockWidgetFloatable
+                         | QtWidgets.QDockWidget.DockWidgetClosable)
         dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         dock.setObjectName('propeditor')  # needed for the state to save/restore correctly
         dock.setWidget(self.propEditorStack)
@@ -1177,6 +1269,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         dock.setMinimumWidth(200)
         dock.setMinimumHeight(0)
         dock.topLevelChanged.connect(self._onPropEditorTopLevelChanged)
+        # The movement preview button lives in this panel, so its preview ends with it
+        dock.visibilityChanged.connect(lambda visible: visible or self.spriteDataEditor.stopMovementPreview())
         dock.installEventFilter(self)
 
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
@@ -1202,7 +1296,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # add tabs to it
         tabs = QtWidgets.QTabWidget()
         tabs.setTabBar(IconsOnlyTabBar())
-        tabs.setIconSize(QtCore.QSize(16, 16))
+        tabs.setIconSize(QtCore.QSize(20, 20))
         tabs.currentChanged.connect(self.CreationTabChanged)
         dock.setWidget(tabs)
         self.creationTabs = tabs
@@ -1277,6 +1371,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         self.objPicker = ObjectPickerWidget()
         self.objPicker.ObjChanged.connect(self.ObjectChoiceChanged)
+        self.objPicker.clicked.connect(self.AddPaletteObjectToPartsBar)
         self.objPicker.ObjReplace.connect(self.ObjectReplace)
         oel.addWidget(self.objPicker, 1)
 
@@ -1324,8 +1419,28 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.sprPicker = SpritePickerWidget()
         self.sprPicker.SpriteChanged.connect(self.SpriteChoiceChanged)
         self.sprPicker.SpriteReplace.connect(self.SpriteReplace)
+        self.sprPicker.itemClicked.connect(self.AddPaletteSpriteToPartsBar)
         self.sprPicker.SwitchView(globals.SpriteCategories[0])
-        spl.addWidget(self.sprPicker, 1)
+
+        # The same actors as a grid of icons (the default); the list stays available
+        self.sprIconGrid = partsbar.PartGrid(partsbar.partIcon, partsbar.partName, 52)
+        self.sprIconGrid.picked.connect(self.SpriteIconPicked)
+        self.sprIconGrid.altPicked.connect(lambda key: self.SpriteReplace(key[1]))
+        self.sprIconGrid.unpicked.connect(lambda key: partsbar.disarm())
+        self.sprPicker.ContentChanged.connect(self.RefreshSpriteIconGrid)
+        self.sprPickerStack = QtWidgets.QStackedWidget()
+        self.sprPickerStack.addWidget(self.sprPicker)
+        self.sprPickerStack.addWidget(partsbar.scrolling(self.sprIconGrid))
+        spl.addWidget(self.sprPickerStack, 1)
+
+        self.sprIconToggle = QtWidgets.QToolButton()
+        self.sprIconToggle.setIcon(GetIcon('grid'))
+        self.sprIconToggle.setCheckable(True)
+        self.sprIconToggle.setToolTip('Show actors as icons (drag one onto the level to place it)')
+        self.sprIconToggle.toggled.connect(self.SetSpritePickerIcons)
+        sspl.addWidget(self.sprIconToggle)
+        self.sprIconToggle.setChecked(bool(setting('SpritePickerIcons', True)))
+        self.SetSpritePickerIcons(self.sprIconToggle.isChecked())
 
         self.defaultPropButton = QtWidgets.QPushButton('Set Default Properties')
         self.defaultPropButton.setEnabled(False)
@@ -1519,17 +1634,81 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # Set the current tab to the Object tab
         self.CreationTabChanged(0)
 
+    @staticmethod
+    def _autosavePaths():
+        folder = os.path.join(globals.user_data_path, 'autosave')
+        return folder, os.path.join(folder, 'level.bin'), os.path.join(folder, 'level.json')
+
     def Autosave(self):
         """
-        Auto saves the level
+        Keeps a recovery copy of the level (every 20 seconds while it has unsaved
+        changes) in the user data folder; it is offered at the next start if Yaz0moto
+        didn't close normally. The level's own file and tilesets are never touched.
         """
-        return
-#        if not globals.AutoSaveDirty: return
-#
-#        data = globals.Level.save()
-#        setSetting('AutoSaveFilePath', self.fileSavePath)
-#        setSetting('AutoSaveFileData', QtCore.QByteArray(data))
-#        globals.AutoSaveDirty = False
+        if not globals.AutoSaveDirty or getattr(globals, 'Level', None) is None or globals.Initializing:
+            return
+
+        folder, dataPath, infoPath = self._autosavePaths()
+        try:
+            data = globals.Level.save(saveTilesets=False)
+            os.makedirs(folder, exist_ok=True)
+            yaz0.writeFile(dataPath, data)
+            with open(infoPath, 'w', encoding='utf-8') as f:
+                json.dump({'path': self.fileSavePath or None, 'deluxe': bool(globals.IsNSMBUDX)}, f)
+        except Exception as e:
+            # For example a sprite outside every zone; try again on the next tick
+            print('Autosave skipped: %r' % e)
+            return
+
+        globals.AutoSaveDirty = False
+
+    def ClearAutosave(self):
+        """
+        Deletes the recovery copy (after saving, or when the level is closed on purpose).
+        """
+        for path in self._autosavePaths()[1:]:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def RestoreAutosave(self):
+        """
+        At startup: if a recovery copy was left behind, offer to restore it.
+        Returns True if a level was restored.
+        """
+        _, dataPath, infoPath = self._autosavePaths()
+        if not os.path.isfile(dataPath):
+            return False
+
+        try:
+            with open(infoPath, encoding='utf-8') as f:
+                info = json.load(f)
+        except (OSError, ValueError):
+            info = {}
+        original = info.get('path')
+
+        if AutoSavedInfoDialog(original or 'None (the level was never saved)').exec_() != QtWidgets.QDialog.Accepted:
+            self.ClearAutosave()
+            return False
+
+        if not self.LoadLevel(None, dataPath, True, 1, True):
+            return False
+
+        # It opened from the recovery copy: point it back at the original file, keep the
+        # recovery copy out of Recent Files, and treat the level as unsaved
+        self.fileSavePath = original or False
+        self.fileTitle = os.path.basename(original) if original else 'untitled'
+        recovery = os.path.normpath(dataPath)
+        self.RecentMenu.FileList = [e for e in self.RecentMenu.FileList if e['path'] != recovery]
+        self.RecentMenu.writeSettings()
+        self.RecentMenu.updateActionList()
+        if original:
+            self.RecentMenu.AddToList(original)
+        SetDirty()
+        self.UpdateTitle()
+        self.Autosave()  # keep the recovery copy until the level is saved
+        return True
 
     def TrackClipboardUpdates(self):
         """
@@ -1615,11 +1794,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                 rawStrLen = data[idx:idx + 4]
                 idx += 4
                 strLen = (rawStrLen[0] << 24) | (rawStrLen[1] << 16) | (rawStrLen[2] << 8) | rawStrLen[3]
-                rawStr = data[idx:idx + strLen]
+                eventTexts[eventId] = decodeMetadataText(data[idx:idx + strLen])
                 idx += strLen
-                newStr = ''
-                for char in rawStr: newStr += chr(char)
-                eventTexts[eventId] = newStr
 
         for id in range(64):
             item = self.eventChooserItems[id]
@@ -1686,9 +1862,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         # Save all the events to the metadata
         data = []
-        for id in range(32):
-            idtext = str(self.eventChooserItems[id].text(1))
-            if idtext == '': continue
+        for id in range(len(self.eventChooserItems)):
+            idtext = encodeMetadataText(str(self.eventChooserItems[id].text(1)))
+            if not idtext: continue
 
             # Add the ID
             data.append(id)
@@ -1701,7 +1877,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             data.append(strlen & 0xFF)
 
             # Add the string
-            for char in idtext: data.append(ord(char))
+            data.extend(idtext)
 
         globals.Area.Metadata.setBinData('EventNotes_A%d' % globals.Area.areanum, data)
         SetDirty()
@@ -1829,11 +2005,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def Deselect(self):
         """
-        Deselect all currently selected items
+        Deselect all currently selected items (Esc), and put down the picked part
         """
         items = self.scene.selectedItems()
         for obj in items:
             obj.setSelected(False)
+        if partsbar.isArmed():
+            partsbar.disarm()
 
     def Cut(self):
         """
@@ -3189,6 +3367,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         setSetting('Theme', dlg.themesTab.themeBox.currentText())
         setSetting('uiStyle', dlg.themesTab.NonWinStyle.currentText())
 
+        # Toolbar icon size (applies at once)
+        setSetting('ToolbarIconSize', dlg.themesTab.toolbarIconSize.currentData())
+        self.toolbar.setIconSize(QtCore.QSize(*(2 * [toolbarIconSize()])))
+
         # Get the UI scale setting (stored as a fractional multiplier)
         setSetting('UIScale', round(dlg.themesTab.uiScale.value()) / 100.0)
 
@@ -3412,31 +3594,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
             return False
 
-        if len(data) > 73295462 and not globals.IsNSMBUDX:
-            QtWidgets.QMessageBox.warning(None, 'Warning',
-                                          "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
-
-        try:
-            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
-                yaz0.compressFASTYZ(data, self.fileSavePath)
-
-            else:
-                with open(self.fileSavePath, 'wb+') as f:
-                    f.write(data)
-
-        except IOError as e:
-            QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
-            return False
-
-        globals.Dirty = False
-        globals.AutoSaveDirty = False
-        globals.TilesetEdited = False
-        self.UpdateTitle()
-
-        # setSetting('AutoSaveFilePath', self.fileSavePath)
-        # setSetting('AutoSaveFileData', 'x')
-        return True
+        return self._writeLevel(data)
 
     def HandleSaveNewArea(self, course, L0, L1, L2):
         """
@@ -3457,31 +3615,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
             return False
 
-        if len(data) > 73295462 and not globals.IsNSMBUDX:
-            QtWidgets.QMessageBox.warning(None, 'Warning',
-                                          "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
-
-        try:
-            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
-                yaz0.compressFASTYZ(data, self.fileSavePath)
-
-            else:
-                with open(self.fileSavePath, 'wb+') as f:
-                    f.write(data)
-
-        except IOError as e:
-            QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
-            return False
-
-        globals.Dirty = False
-        globals.AutoSaveDirty = False
-        globals.TilesetEdited = False
-        self.UpdateTitle()
-
-        # setSetting('AutoSaveFilePath', self.fileSavePath)
-        # setSetting('AutoSaveFileData', 'x')
-        return True
+        return self._writeLevel(data)
 
     def HandleSaveAs(self):
         """
@@ -3497,14 +3631,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             fn = (os.path.splitext(fn)[0] if fn.lower().endswith('.szs') else fn) + '.sarc'
         setSetting('LastFilePath', os.path.dirname(fn))
 
+        # Switch to the new name only once the level is actually written there
+        oldPath, oldTitle = self.fileSavePath, self.fileTitle
         self.fileSavePath = fn
         self.fileTitle = os.path.basename(fn)
+
+        def failed():
+            self.fileSavePath, self.fileTitle = oldPath, oldTitle
+            return False
 
         name = None
         if self._usesOuterSarc():
             name = self.getInnerSarcName()
             if name == '':
-                return False
+                return failed()
             if "-" not in name:
                 warningBox = QtWidgets.QMessageBox(QtWidgets.QMessageBox.NoIcon, 'Name warning',
                                                    'The input name does not include a -, which is what retail levels use. \nThis may crash, because it does not fit the proper format.')
@@ -3514,32 +3654,44 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             data = globals.Level.save(name)
         except ValueError as e:
             QtWidgets.QMessageBox.warning(None, 'Save Error', str(e))
-            return False
+            return failed()
 
+        if not self._writeLevel(data):
+            return failed()
+
+        self.RecentMenu.AddToList(self.fileSavePath)
+        return True
+
+    def _writeLevel(self, data):
+        """
+        Writes the saved level to self.fileSavePath (Yaz0-compressed for Wii U .szs files)
+        and marks it as saved. If anything fails, the file on disk is left as it was, the
+        user is told, and the level stays unsaved.
+        """
         if len(data) > 73295462 and not globals.IsNSMBUDX:
             QtWidgets.QMessageBox.warning(None, 'Warning',
                                           "This level's uncompressed size has exceeded 70 MB, which is the maximum capacity NSMBU can handle.<br>It's recommended to make this level smaller to prevent the game from crashing.<br>This can be done by doing some of the following:<br>- Deleting all instances of some actors with a high filesize.<br>- Having less areas.<br>- Having less used tiles or objects per area.<br>- Disabling lossless compression (RGBA8) for tilesets.<br>")
 
+        compress = self.fileSavePath.lower().endswith('.szs') and not globals.IsNSMBUDX
         try:
-            if self.fileSavePath.endswith('.szs') and not globals.IsNSMBUDX:
-                yaz0.compressFASTYZ(data, self.fileSavePath)
-
+            if compress:
+                if not yaz0.compressFASTYZ(data, self.fileSavePath):
+                    raise OSError('The level could not be compressed or written.')
             else:
-                with open(self.fileSavePath, 'wb+') as f:
-                    f.write(data)
+                yaz0.writeFile(self.fileSavePath, data)
 
-        except IOError as e:
+        except OSError as e:
             QtWidgets.QMessageBox.warning(None, 'Error',
-                                          'Error while Yaz0moto was trying to save the level:<br>(#[err1]) [err2]<br><br>(Your work has not been saved! Try saving it under a different filename or in a different folder.)'.replace('[err1]', str(e.args[0])).replace('[err2]', str(e.args[1])))
+                                          'Error while Yaz0moto was trying to save the level:<br>%s<br><br>'
+                                          '(Your work has not been saved! Try saving it under a different filename or in a different folder.)'
+                                          % (e.strerror or e))
             return False
 
         globals.Dirty = False
         globals.AutoSaveDirty = False
         globals.TilesetEdited = False
         self.UpdateTitle()
-
-        self.RecentMenu.AddToList(self.fileSavePath)
-
+        self.ClearAutosave()
         return True
 
     def HandleExit(self):
@@ -3552,7 +3704,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
     def _isDeluxeLevelArchive(arc):
         """
         Wii U course data is big-endian and Deluxe course data is little-endian. The SARC
-        wrapper can't tell them apart (retail Deluxe levels are big-endian SARCs), so look
+        wrapper can't tell them apart (retail Deluxe levels use big-endian SARCs, and the
+        game accepts either byte order there; Yaz0moto writes little-endian ones), so look
         at the first block offset of a courseN.bin, inside an inner SARC if there is one.
         Returns True/False, or None if no course data was found.
         """
@@ -3929,11 +4082,113 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         dlg = SpritemapDialog(self)
         dlg.exec_()
 
-    def EditTilesets(self, slot):
+    def HandlePreviewAllMovement(self, checked):
         """
-        Handle editing a specific tileset slot
+        Start or stop previewing every movement controller in the area
         """
-        pass
+        if not checked:
+            movementpreview.stop('all')
+            return
+
+        error = movementpreview.start_all()
+        if error:
+            self._syncPreviewAllAction()
+            self.statusBar().showMessage(error, 8000)
+
+    def _syncPreviewAllAction(self):
+        act = self.actions['previewallmovement']
+        act.blockSignals(True)
+        act.setChecked(movementpreview.is_running('all'))
+        act.blockSignals(False)
+
+    def HandleCheckLevel(self):
+        """
+        Show the Check Level window (non-modal, so the level can be fixed while it is open)
+        """
+        from .levelcheckdialog import LevelCheckDialog
+        dlg = getattr(self, 'levelCheckDialog', None)
+        if dlg is None:
+            dlg = self.levelCheckDialog = LevelCheckDialog(self)
+        else:
+            dlg.runChecks()
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def HandleExportMod(self):
+        """
+        Export the saved level, and the files it needs, as a mod package
+        """
+        if globals.Dirty or not self.fileSavePath:
+            reply = QtWidgets.QMessageBox.question(self, 'Export Mod Package',
+                                                   'The level has to be saved before it can be exported. Save it now?',
+                                                   QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Cancel,
+                                                   QtWidgets.QMessageBox.Save)
+            if reply != QtWidgets.QMessageBox.Save or not self.HandleSave():
+                return
+
+        from .modexport import ExportModDialog
+        ExportModDialog(self.fileSavePath, self).exec_()
+
+    def HandleExportAllTilesets(self):
+        """
+        Copy every tileset the level uses (all areas), as saved, into one folder
+        """
+        from .modexport import level_tilesets
+        names = level_tilesets(globals.Level)
+        if not names:
+            QtWidgets.QMessageBox.information(self, 'Export All Tilesets', 'This level uses no tilesets.')
+            return
+
+        if globals.TilesetEdited:
+            reply = QtWidgets.QMessageBox.question(
+                self, 'Export All Tilesets',
+                'Tileset changes that haven\'t been saved yet are not included (the tileset editor\'s '
+                'File > Export All Tilesets includes them). Export the saved tilesets?',
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+            if reply != QtWidgets.QMessageBox.Yes:
+                return
+
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Export All Tilesets', str(setting('LastTilesetExportDir', '')))
+        if not folder:
+            return
+        setSetting('LastTilesetExportDir', folder)
+
+        written, missing, failed = [], [], []
+        for name in names:
+            try:
+                if globals.IsNSMBUDX:
+                    # The files in Unit are already standalone tilesets: copy them byte for byte
+                    source = globals.gamedef.FindTilesetFile(name)
+                    if source is None:
+                        missing.append(name)
+                        continue
+                    target = os.path.join(folder, name + '.szs')
+                    with open(source, 'rb') as f:
+                        yaz0.writeFile(target, f.read())
+                else:
+                    data = globals.szsData.get(name)
+                    if data is None:
+                        missing.append(name)
+                        continue
+                    target = os.path.join(folder, name + '.sarc')
+                    yaz0.writeFile(target, data)
+                written.append(os.path.basename(target))
+            except OSError as e:
+                failed.append('%s: %s' % (name, e.strerror or e))
+
+        message = 'Exported %d tileset(s) to:\n%s' % (len(written), folder)
+        if written:
+            message += '\n\n' + '\n'.join(written)
+        if missing:
+            message += '\n\nNot found: ' + ', '.join(missing)
+        if failed:
+            message += '\n\nCould not export:\n' + '\n'.join(failed)
+        if missing or failed:
+            QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', message)
+        else:
+            QtWidgets.QMessageBox.information(self, 'Export All Tilesets', message)
 
     def HandleFullscreen(self, checked):
         """
@@ -4037,7 +4292,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         b = []
         for com in globals.Area.comments:
-            xpos, ypos, tlen = com.objx, com.objy, len(com.text)
+            text = encodeMetadataText(com.text)
+            xpos, ypos, tlen = com.objx, com.objy, len(text)
             b.append(xpos >> 24)
             b.append((xpos >> 16) & 0xFF)
             b.append((xpos >> 8) & 0xFF)
@@ -4050,7 +4306,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             b.append((tlen >> 16) & 0xFF)
             b.append((tlen >> 8) & 0xFF)
             b.append(tlen & 0xFF)
-            for char in com.text: b.append(ord(char))
+            b.extend(text)
         globals.Area.Metadata.setBinData('InLevelComments_A%d' % globals.Area.areanum, b)
 
     def closeEvent(self, event):
@@ -4080,8 +4336,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
             globals.gamedef.SetLastLevel(str(self.fileSavePath))
 
-            setSetting('AutoSaveFilePath', 'none')
-            setSetting('AutoSaveFileData', 'x')
+            # Closed on purpose, so the recovery copy is no longer needed
+            self.ClearAutosave()
 
             event.accept()
 
@@ -4120,6 +4376,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Load a level from any game into the editor
         """
+        # Previews draw on the scene that is about to be cleared
+        movementpreview.stop()
+
         new = name is None
 
         if new:
@@ -4455,6 +4714,14 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.scene.liveBackground = None
         self.QueueLiveBackground()
 
+        # The previous level's recovery copy is no longer needed (if the user had unsaved
+        # changes, they were asked before getting here)
+        self.ClearAutosave()
+
+        # An open Check Level window would point at the previous level's items
+        if getattr(self, 'levelCheckDialog', None) is not None and self.levelCheckDialog.isVisible():
+            self.levelCheckDialog.runChecks()
+
         # If we got this far, everything worked! Return True.
         return True
 
@@ -4607,6 +4874,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         self.sprPicker.LoadItems()
         self.spriteViewPicker.setCurrentIndex(0)
+        from . import spriteicons
+        spriteicons.clearCache()
+        self.sprIconGrid.icons.clear()
+        self.sprIconGrid.update()
         self.spriteDataEditor.setSprite(self.spriteDataEditor.spritetype, True)
         self.spriteDataEditor.update()
 
@@ -4629,6 +4900,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             # must catch this error: if you close the app while something is selected,
             # you get a RuntimeError about the 'underlying C++ object being deleted'
             return
+
+        # A movement preview belongs to the actor it was started from
+        self.spriteDataEditor.stopMovementPreview()
 
         # do this to avoid flicker
         showSpritePanel = False
@@ -4839,7 +5113,11 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.CurrentSelection = selitems
 
         n = len(self.selObjs) if self.selObjs else 0
-        if showSpritePanel:
+        if self.quietSelection:
+            # Selected by dragging over or right-clicking: the panel opens only on a direct
+            # click (or "Settings" in the right-click menu)
+            self.propEditorDock.setVisible(False)
+        elif showSpritePanel:
             title = 'Selected Actor Properties'
             self._switchPropEditor(self.spriteDataEditor, title)
         elif showEntrancePanel:
@@ -5159,11 +5437,18 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Handles a new object being chosen
         """
-        if globals.CurrentPaintType not in (0, 10):
+        # Decide by the visible tab, not CurrentPaintType: that can still hold a
+        # stale value (e.g. 4 from the Actors tab at startup), which made Main
+        # objects get decoded as Local ones.
+        if globals.CurrentPaintType == 10:
+            globals.CurrentObject = type
+
+        elif self.objAllTab.currentIndex() == 1:
             globals.CurrentObject, globals.CurrentPaintType = self.objTS123Tab.getObjectAndPaintType(type)
 
         else:
             globals.CurrentObject = type
+            globals.CurrentPaintType = 0
 
     def ObjectReplace(self, type):
         """
@@ -5173,12 +5458,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         items = self.scene.selectedItems()
         type_obj = ObjectItem
-        tileset = globals.CurrentPaintType
+        tileset = 0
         changed = False
         data = 0
 
-        if globals.CurrentPaintType != 0:
-            type, _ = self.objTS123Tab.getObjectAndPaintType(type)
+        if self.objAllTab.currentIndex() == 1:
+            type, tileset = self.objTS123Tab.getObjectAndPaintType(type)
 
         else:
             oItems = {16: 1, 17: 2, 18: 3, 19: 4, 20: 5, 21: 6, 22: 7, 23: 8,
@@ -5261,6 +5546,58 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         Handles a new sprite search term being entered
         """
         self.sprPicker.SetSearchString(text)
+
+    def SetSpritePickerIcons(self, icons):
+        """
+        Shows the actors to add as a grid of icons, or as the named list
+        """
+        setSetting('SpritePickerIcons', bool(icons))
+        self.sprPickerStack.setCurrentIndex(1 if icons else 0)
+        if icons:
+            self.RefreshSpriteIconGrid()
+
+    def RefreshSpriteIconGrid(self):
+        """
+        Fills the icon grid with the actors the list shows (same view and search)
+        """
+        if not hasattr(self, 'sprIconGrid') or self.sprPickerStack.currentIndex() != 1:
+            return
+        sections = []
+        for i in range(self.sprPicker.topLevelItemCount()):
+            node = self.sprPicker.topLevelItem(i)
+            if node.isHidden():
+                continue
+            keys = []
+            for j in range(node.childCount()):
+                child = node.child(j)
+                data = child.data(0, Qt.UserRole)
+                if not child.isHidden() and (isinstance(data, str) or (isinstance(data, int) and data >= 0)):
+                    keys.append(('spr', data))
+            sections.append((None if node.data(0, Qt.UserRole) == -3 else node.text(0), keys))
+        self.sprIconGrid.setSections(sections)
+
+    def SpriteIconPicked(self, key):
+        """
+        An actor was picked in the icon grid
+        """
+        globals.CurrentPaintType = 4
+        self.SpriteChoiceChanged(key[1])
+        self.partsBar.addRecent(key)
+
+    def AddPaletteObjectToPartsBar(self, index=None):
+        """
+        Puts the object just picked in the palette on the parts bar
+        """
+        if globals.CurrentPaintType in (0, 1, 2, 3) and globals.CurrentObject >= 0:
+            self.partsBar.addRecent(('obj', globals.CurrentPaintType, globals.CurrentObject))
+
+    def AddPaletteSpriteToPartsBar(self, item, column=0):
+        """
+        Puts the actor just picked in the list on the parts bar
+        """
+        data = item.data(0, Qt.UserRole)
+        if isinstance(data, str) or (isinstance(data, int) and data >= 0):
+            self.partsBar.addRecent(('spr', data))
 
     def NewCurrentSearchTerm(self, text):
         """
@@ -5624,9 +5961,36 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         loc.UpdateListItem()
         self.levelOverview.update()
 
+    def ShowSelectionProperties(self):
+        """Opens the properties panel for the current selection (even if it was selected quietly)."""
+        self.quietSelection = False
+        self.ChangeSelectionHandler()
+
+    def CloseFrontWindowOnEscape(self, obj):
+        """
+        Esc closes the window it was pressed in, as its X button would. Returns True if it did.
+        Menus, popups and dialogs already close themselves, and the main window never does.
+        """
+        app = QtWidgets.QApplication
+        if app.activePopupWidget() is not None or app.activeModalWidget() is not None:
+            return False
+        if not isinstance(obj, QtWidgets.QWidget):
+            return False
+        win = obj.window()
+        if win is self or isinstance(win, QtWidgets.QDialog):
+            return False
+        if isinstance(win, QtWidgets.QDockWidget) and not win.features() & QtWidgets.QDockWidget.DockWidgetClosable:
+            return False
+        win.close()
+        return True
+
     def eventFilter(self, obj, event):
-        """Track position and width changes on the floating prop-editor dock."""
-        if obj is self.propEditorDock and self.propEditorDock.isFloating():
+        """Esc for other windows; track position and width changes on the floating prop-editor dock."""
+        t = event.type()
+        if t == QtCore.QEvent.KeyPress and event.key() == Qt.Key_Escape and self.CloseFrontWindowOnEscape(obj):
+            return True
+        dock = getattr(self, 'propEditorDock', None)  # this also filters the whole app, from before it exists
+        if obj is dock and dock.isFloating():
             t = event.type()
             if t == QtCore.QEvent.Move:
                 self._propEditorPos = obj.pos()
@@ -5828,6 +6192,16 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Handles key press events for the main window if needed
         """
+        # Esc closes the properties panel (like its X), then puts down the picked part, so
+        # clicking the level selects again. It never closes the editor itself.
+        if event.key() == Qt.Key_Escape:
+            if self.propEditorDock.isVisible():
+                self.propEditorDock.close()
+            elif partsbar.isArmed():
+                partsbar.disarm()
+            event.accept()
+            return
+
         if event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace:
             sel = self.scene.selectedItems()
             if len(sel) > 0:

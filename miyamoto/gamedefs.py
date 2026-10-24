@@ -296,6 +296,19 @@ class MiyamotoGameDefinition:
             name = 'LastLevel_' + self.name
             setSetting(name, path)
 
+    def patchFolders(self):
+        """
+        The folders of the patches (mods) this game is made of, most specific first:
+        <patches folder>/<patch name>
+        """
+        folders = []
+        gamedef = self
+        while gamedef is not None:
+            if gamedef.custom and gamedef.source == 'mod' and gamedef.gamepath:
+                folders.append(os.path.join(_mod_root(gamedef.gamepath), gamedef.gamepath))
+            gamedef = gamedef.base
+        return folders
+
     def recursiveFiles(self, name, isPatch=False, folder=False):
         """
         Checks each base of this gamedef and returns a list of successive file paths

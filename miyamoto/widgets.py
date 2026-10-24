@@ -24,6 +24,8 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
 
 from . import globals
+from . import movementpreview
+from . import partsbar
 from . import undomanager
 
 from .items import ObjectItem, ZoneItem, LocationItem, SpriteItem
@@ -48,6 +50,41 @@ from .ui import createHorzLine, createVertLine, GetIcon
 from .verifications import SetDirty
 
 #################################
+
+
+class UndoHistoryWidget(QtWidgets.QListWidget):
+    """
+    Lists the undo history, oldest first, with undone steps greyed out.
+    Clicking a step undoes or redoes everything up to it.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setToolTip('Click a step to go back (or forward) to it')
+        globals.UndoManager.stackChanged.connect(self.refresh)
+        self.itemClicked.connect(self.jump)
+        self.refresh()
+
+    def refresh(self):
+        um = globals.UndoManager
+        self.blockSignals(True)
+        self.clear()
+
+        self.addItem('Earliest kept state' if len(um.undo_stack) + len(um.redo_stack) >= um.max_history else 'Start')
+        for cmd in um.undo_stack:
+            self.addItem(cmd.description or 'Edit')
+
+        undone = self.palette().color(QtGui.QPalette.Disabled, QtGui.QPalette.Text)
+        for cmd in reversed(um.redo_stack):
+            item = QtWidgets.QListWidgetItem(cmd.description or 'Edit')
+            item.setForeground(undone)
+            self.addItem(item)
+
+        self.setCurrentRow(len(um.undo_stack))
+        self.blockSignals(False)
+
+    def jump(self, item):
+        globals.UndoManager.jump_to(self.row(item))
 
 
 class LevelOverviewWidget(QtWidgets.QWidget):
@@ -234,6 +271,21 @@ class ObjectPickerWidget(QtWidgets.QListView):
         self.setItemDelegate(self.ObjectItemDelegate())
 
         self.clicked.connect(self.HandleObjReplace)
+        self.clicked.connect(self.PutDownIfClickedAgain)
+        self.clickedPicked = False
+
+    def mousePressEvent(self, event):
+        index = self.indexAt(event.pos())
+        # Remember whether this click is on the object that is already picked
+        self.clickedPicked = (event.button() == Qt.LeftButton and index.isValid()
+                              and index == self.currentIndex() and partsbar.isArmed())
+        super().mousePressEvent(event)
+
+    def PutDownIfClickedAgain(self, index):
+        """Clicking the picked object again puts it down."""
+        if self.clickedPicked:
+            self.clickedPicked = False
+            partsbar.disarm()
 
     def contextMenuEvent(self, event):
         """
@@ -284,6 +336,11 @@ class ObjectPickerWidget(QtWidgets.QListView):
         else:
             self.setModel(self.objTS123Tab.getActiveModel())
         self.viewport().update()
+
+        # The parts bar shows these previews too
+        bar = getattr(globals.mainWindow, 'partsBar', None)
+        if bar is not None:
+            bar.refresh()
 
     def ShowTileset(self, id):
         """
@@ -1731,6 +1788,8 @@ class SpritePickerWidget(QtWidgets.QTreeWidget):
         self.setIndentation(16)
         self.setItemDelegate(SpritePickerItemDelegate(self))
         self.currentItemChanged.connect(self.HandleItemChange)
+        self.itemClicked.connect(self.PutDownIfClickedAgain)
+        self.clickedPicked = False
         self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
 
         from . import loading
@@ -1802,6 +1861,20 @@ class SpritePickerWidget(QtWidgets.QTreeWidget):
         self.itemClicked.connect(self.HandleSprReplace)
 
         self.SwitchView(globals.SpriteCategories[0])
+        self.ContentChanged.emit()
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        # Remember whether this click is on the actor that is already picked
+        self.clickedPicked = (event.button() == Qt.LeftButton and item is not None
+                              and item is self.currentItem() and partsbar.isArmed())
+        super().mousePressEvent(event)
+
+    def PutDownIfClickedAgain(self, item, column=0):
+        """Clicking the picked actor again puts it down."""
+        if self.clickedPicked:
+            self.clickedPicked = False
+            partsbar.disarm()
 
     # ── scroll override ────────────────────────────────────────────────────────
 
@@ -1845,6 +1918,7 @@ class SpritePickerWidget(QtWidgets.QTreeWidget):
         # before the first scroll event arrives.
         self.scheduleDelayedItemsLayout()
         self.executeDelayedItemsLayout()
+        self.ContentChanged.emit()
 
     def HandleItemChange(self, current, previous):
         """
@@ -1899,6 +1973,7 @@ class SpritePickerWidget(QtWidgets.QTreeWidget):
 
         if current_nodes:
             current_nodes[0].setExpanded(True)
+        self.ContentChanged.emit()
 
     def HandleSprReplace(self, item, column):
         """
@@ -1911,6 +1986,7 @@ class SpritePickerWidget(QtWidgets.QTreeWidget):
 
     SpriteChanged = QtCore.pyqtSignal(object)
     SpriteReplace = QtCore.pyqtSignal(object)
+    ContentChanged = QtCore.pyqtSignal()  # the shown actors changed (view, search or reload)
 
 
 class SpriteEditorWidget(QtWidgets.QWidget):
@@ -1961,9 +2037,42 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.noteButton.clicked.connect(self.ShowNoteTooltip)
         self.noteButton.setVisible(False)
 
+        self.previewMovementButton = QtWidgets.QToolButton()
+        self.previewMovementButton.setIcon(GetIcon('animation'))
+        self.previewMovementButton.setText('Preview Movement')
+        self.previewMovementButton.setToolTip('Play a preview of how the actors with this Movement ID move.<br>'
+                                              'Nothing in the level is changed.')
+        self.previewMovementButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.previewMovementButton.setAutoRaise(True)
+        self.previewMovementButton.setCheckable(True)
+        self.previewMovementButton.toggled.connect(self.HandlePreviewMovement)
+        self.previewMovementButton.setVisible(False)
+
+        self.previewSpeedBox = QtWidgets.QComboBox()
+        self.previewSpeedBox.setToolTip('Preview speed (1x is the speed of the game)')
+        self.previewSpeedBox.setFocusPolicy(Qt.ClickFocus)
+        for value in movementpreview.SPEEDS:
+            self.previewSpeedBox.addItem(('%gx' % value) + (' (game)' if value == 1 else ''), value)
+        self.previewSpeedBox.setCurrentIndex(movementpreview.SPEEDS.index(movementpreview.speed()))
+        self.previewSpeedBox.currentIndexChanged.connect(
+            lambda i: movementpreview.set_speed(self.previewSpeedBox.itemData(i)))
+        self.previewSpeedBox.setVisible(False)
+        movementpreview.listeners.append(self._syncPreviewButton)
+
+        self.previewOptionsButton = QtWidgets.QToolButton()
+        self.previewOptionsButton.setText('Options')
+        self.previewOptionsButton.setToolTip('Play once, and show where the movement starts and ends')
+        self.previewOptionsButton.setAutoRaise(True)
+        self.previewOptionsButton.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.previewOptionsButton.setMenu(movementpreview.options_menu(self.previewOptionsButton))
+        self.previewOptionsButton.setVisible(False)
+
         toplayout = QtWidgets.QHBoxLayout()
         toplayout.addWidget(self.spriteLabel)
         toplayout.addStretch(1)
+        toplayout.addWidget(self.previewMovementButton)
+        toplayout.addWidget(self.previewSpeedBox)
+        toplayout.addWidget(self.previewOptionsButton)
         toplayout.addWidget(self.relatedObjFilesButton)
         toplayout.addWidget(self.noteButton)
 
@@ -2880,6 +2989,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self._multiMode = True
         self._mixedTypeMode = False
         self._multiItems = list(items)
+        self._setPreviewControlsVisible(False)
 
         merged, diff = self._computeMergedData([it.spritedata for it in items])
         self.data = merged
@@ -2930,6 +3040,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.noteBox.setVisible(False)
         self.noteButton.setVisible(False)
         self.relatedObjFilesButton.setVisible(False)
+        self._setPreviewControlsVisible(False)
 
         merged, _ = self._computeMergedData([it.spritedata for it in items])
         self.data = merged
@@ -2950,6 +3061,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.initialState.setMinimum(0)
         self.initialState.setSpecialValueText('')
         self.initialState.blockSignals(False)
+        self._setPreviewControlsVisible(movementpreview.has_movement_field(type))
 
         if (self.spritetype == type) and not reset: return
 
@@ -3462,6 +3574,32 @@ class SpriteEditorWidget(QtWidgets.QWidget):
     def ShowNoteTooltip(self):
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), self.notes, self)
 
+    def HandlePreviewMovement(self, checked):
+        if not checked:
+            movementpreview.stop('single')
+            return
+
+        sprite = globals.mainWindow.selObj
+        error = movementpreview.start(sprite) if isinstance(sprite, SpriteItem) else 'Select a single actor first.'
+        if error:
+            self.stopMovementPreview()
+            QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), error, self.previewMovementButton)
+
+    def stopMovementPreview(self):
+        """Stops a running single-actor preview (a "preview all" keeps going)."""
+        movementpreview.stop('single')
+        self._syncPreviewButton()
+
+    def _syncPreviewButton(self):
+        self.previewMovementButton.blockSignals(True)
+        self.previewMovementButton.setChecked(movementpreview.is_running('single'))
+        self.previewMovementButton.blockSignals(False)
+
+    def _setPreviewControlsVisible(self, visible):
+        self.previewMovementButton.setVisible(visible)
+        self.previewSpeedBox.setVisible(visible)
+        self.previewOptionsButton.setVisible(visible)
+
     def ShowRelatedObjFilesTooltip(self):
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), self.relatedObjFiles, self)
 
@@ -3518,12 +3656,12 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         """
         raw = text.replace(' ', '')
         if len(raw) != 24:
-            self.raweditor.setStyleSheet('QLineEdit { background-color: #ffd2d2; }')
+            self.raweditor.setStyleSheet('QLineEdit { background-color: #ffd2d2; color: #1b1b1e; }')
             return
         try:
             data = bytes.fromhex(raw)
         except ValueError:
-            self.raweditor.setStyleSheet('QLineEdit { background-color: #ffd2d2; }')
+            self.raweditor.setStyleSheet('QLineEdit { background-color: #ffd2d2; color: #1b1b1e; }')
             return
 
         self.raweditor.setStyleSheet('')
@@ -4814,6 +4952,249 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
             hints |= QtGui.QPainter.SmoothPixmapTransform
         self.setRenderHints(hints)
 
+        # Parts dragged from the parts bar or the palettes can be dropped on the level
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if partsbar.keyFromMime(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if partsbar.keyFromMime(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        key = partsbar.keyFromMime(event.mimeData())
+        if key is None:
+            return super().dropEvent(event)
+        event.acceptProposedAction()
+        partsbar.placeAt(self, key, event.pos())
+        bar = getattr(globals.mainWindow, 'partsBar', None)
+        if bar is not None:
+            bar.addRecent(key)
+
+    # ---------------------------------------------------------------- mouse controls
+    #
+    # Left click: with a part picked (in the palette, the actor icons or the parts bar), place
+    # it, dragging to size it; with nothing picked, select things and drag them around.
+    # With the entrance, path, location, comment or Nabbit path tools, left click places on
+    # empty space and selects one of those things when clicked on it.
+    # Left drag on empty space: select everything in the box, without opening the properties
+    # panel (that only opens when a thing is clicked directly).
+    # Right click: select a thing and show what it is, with its actions (for actors: Info,
+    # Settings and Delete).
+    # Ctrl + right click: the zone menu. Middle drag: scroll.
+    #
+    # The classicMouse* handlers below are the original ones (right click painted); these
+    # translate to them, so placing, sizing and undo work exactly as before.
+
+    LEVEL_ITEMS = (ObjectItem, SpriteItem, EntranceItem, LocationItem, PathItem, NabbitPathItem, CommentItem, ZoneItem)
+    TOOL_ITEMS = {5: EntranceItem, 6: PathItem, 7: LocationItem, 9: CommentItem, 12: NabbitPathItem}
+
+    placing = False
+    crossCursor = False
+
+    def levelItems(self, pos):
+        """The level things under a point of the view, topmost first (sprite images etc. count as their sprite)."""
+        out = []
+        for item in self.items(pos):
+            while item is not None and not isinstance(item, self.LEVEL_ITEMS):
+                item = item.parentItem()
+            if item is not None and item not in out:
+                out.append(item)
+        return out
+
+    def wouldPlace(self, pos):
+        """Whether a left click at pos places something (rather than selecting)."""
+        if partsbar.isArmed():
+            return True
+        kind = self.TOOL_ITEMS.get(globals.CurrentPaintType)
+        return kind is not None and not any(isinstance(item, kind) for item in self.levelItems(pos))
+
+    @staticmethod
+    def withButton(event, type_, button, buttons):
+        return QtGui.QMouseEvent(type_, event.localPos(), event.windowPos(), event.screenPos(),
+                                 button, buttons, Qt.NoModifier)
+
+    def mousePressEvent(self, event):
+        button = event.button()
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+
+        if (button == Qt.LeftButton and event.buttons() == Qt.LeftButton and modifiers == Qt.NoModifier
+                and self.wouldPlace(event.pos())):
+            self.placing = True
+            self.classicMousePressEvent(self.withButton(event, QtCore.QEvent.MouseButtonPress, Qt.RightButton, Qt.RightButton))
+            return
+
+        if button == Qt.RightButton and event.buttons() == Qt.RightButton and modifiers != Qt.ControlModifier:
+            event.accept()
+            self.showItemMenu(event)
+            return
+
+        self.classicMousePressEvent(event)
+
+        # Nothing grabbed the press, so this is a rubber-band drag: what it passes over is
+        # selected quietly
+        if button == Qt.LeftButton and event.buttons() == Qt.LeftButton and self.scene().mouseGrabberItem() is None:
+            self.rubberBanding = True
+            globals.mainWindow.quietSelection = True
+
+    rubberBanding = False
+
+    def viewportEvent(self, event):
+        # No tooltips about the things passed over while a button is held (dragging)
+        if event.type() == QtCore.QEvent.ToolTip and QtWidgets.QApplication.mouseButtons() != Qt.NoButton:
+            return True
+        return super().viewportEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.placing and event.buttons() & Qt.LeftButton:
+            self.classicMouseMoveEvent(self.withButton(event, QtCore.QEvent.MouseMove, Qt.NoButton, Qt.RightButton))
+            return
+
+        # A crosshair while a part is picked, so it's clear that clicking places it
+        if event.buttons() == Qt.NoButton:
+            armed = partsbar.isArmed()
+            if armed and not self.crossCursor:
+                self.viewport().setCursor(Qt.CrossCursor)
+            elif not armed and self.crossCursor:
+                self.viewport().unsetCursor()
+            self.crossCursor = armed
+
+        self.classicMouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.placing and event.button() == Qt.LeftButton:
+            self.placing = False
+            self.classicMouseReleaseEvent(self.withButton(event, QtCore.QEvent.MouseButtonRelease, Qt.RightButton, Qt.NoButton))
+            return
+        self.classicMouseReleaseEvent(event)
+        if self.rubberBanding and event.button() == Qt.LeftButton:
+            self.rubberBanding = False
+            globals.mainWindow.quietSelection = False
+
+    def placeAt(self, pos):
+        """Places the picked part at a point of the view (used for drag and drop)."""
+        point = QtCore.QPointF(pos)
+        self.classicMousePressEvent(QtGui.QMouseEvent(QtCore.QEvent.MouseButtonPress, point, Qt.RightButton,
+                                                      Qt.RightButton, Qt.NoModifier))
+        self.classicMouseReleaseEvent(QtGui.QMouseEvent(QtCore.QEvent.MouseButtonRelease, point, Qt.RightButton,
+                                                        Qt.NoButton, Qt.NoModifier))
+
+    @staticmethod
+    def describe(item):
+        """A short description of a level thing, for its right-click menu."""
+        if isinstance(item, SpriteItem):
+            from . import spriteicons
+            return '%s (actor %s)' % (spriteicons.spriteName(item.type), item.type)
+        if isinstance(item, ObjectItem):
+            return 'Tileset %d, object %d - %dx%d tiles, layer %d' % (item.tileset + 1, item.type, item.width,
+                                                                     item.height, item.layer)
+        if isinstance(item, EntranceItem):
+            names = getattr(globals, 'EntranceTypeNames', None) or []
+            kind = names[item.enttype] if 0 <= item.enttype < len(names) else 'type (%d)' % item.enttype
+            return 'Entrance %d - %s' % (item.entid, kind)
+        if isinstance(item, LocationItem):
+            return 'Location %d' % item.id
+        if isinstance(item, NabbitPathItem):
+            return 'Nabbit path node'
+        if isinstance(item, PathItem):
+            return 'Path %d, node %d' % (item.pathid, item.nodeid)
+        if isinstance(item, CommentItem):
+            text = item.text.replace('\n', ' ')
+            return 'Comment: ' + (text[:40] + '...' if len(text) > 40 else text)
+        if isinstance(item, ZoneItem):
+            return 'Zone %d' % (item.id + 1)
+        return 'Item'
+
+    def showActorInfo(self, sprite):
+        """The right-click menu's Info: what an actor is and where, with its notes."""
+        from html import escape
+        from . import spriteicons
+        if isinstance(sprite.type, str):
+            sdef = globals.CustomSpriteDefinitions.get(sprite.type)
+        elif 0 <= sprite.type < len(globals.Sprites or ()):
+            sdef = globals.Sprites[sprite.type]
+        else:
+            sdef = None
+
+        zone = sprite.nearestZone(True)
+        data = bytes(sprite.spritedata)
+        raw = ' '.join(data[i:i + 2].hex() for i in range(0, len(data), 2))
+        rows = [
+            ('Actor', '%s (ID %s)' % (escape(spriteicons.spriteName(sprite.type)), escape(str(sprite.type)))),
+            ('Position', '%d, %d (tile %d, %d)' % (sprite.objx, sprite.objy, sprite.objx // 16, sprite.objy // 16)),
+            ('Zone', escape(zone.title) if zone is not None else 'None (outside every zone)'),
+            ('Layer', str(sprite.layer)),
+            ('Initial state', str(sprite.initialState)),
+            ('Raw data', '<code>%s</code>' % raw),
+        ]
+        if sdef is None:
+            rows.append(('Definition', 'Unknown actor: it has no definition in this game or its patches'))
+        text = '<table cellspacing="4">%s</table>' % ''.join(
+            '<tr><td><b>%s:</b></td><td>%s</td></tr>' % row for row in rows)
+        if sdef is not None and sdef.notes:
+            text += '<p><b>Notes:</b><br>%s</p>' % sdef.notes
+        if sdef is not None and sdef.relatedObjFiles:
+            text += '<p><b>Object files:</b><br>%s</p>' % sdef.relatedObjFiles
+
+        box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Information, 'Actor Info', text,
+                                    QtWidgets.QMessageBox.Close, self)
+        box.setTextFormat(Qt.RichText)
+        box.exec_()
+
+    def showItemMenu(self, event):
+        """
+        Right click: select the thing under the cursor (its properties panel opens) and show
+        what it is, with its actions. On empty space, a picked part is put down.
+        """
+        items = self.levelItems(event.pos())
+        mw = globals.mainWindow
+        if not items:
+            if partsbar.isArmed():
+                partsbar.disarm()
+            return
+
+        item = items[0]
+        isActor = isinstance(item, SpriteItem)
+        if not item.isSelected():
+            # An actor's panel opens from "Settings", not from the right click itself
+            mw.quietSelection = isActor
+            try:
+                self.scene().clearSelection()
+                item.setSelected(True)
+            finally:
+                mw.quietSelection = False
+
+        menu = QtWidgets.QMenu(self)
+        title = menu.addAction(self.describe(item))
+        title.setEnabled(False)
+        menu.addSeparator()
+        if isActor:
+            menu.addAction(GetIcon('info'), 'Info...', lambda: self.showActorInfo(item))
+            menu.addAction(GetIcon('settings'), 'Settings...', mw.ShowSelectionProperties)
+            menu.addSeparator()
+            delete = menu.addAction(GetIcon('delete'), 'Delete')
+            delete.triggered.connect(lambda: QtWidgets.QApplication.sendEvent(
+                mw, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)))
+        elif isinstance(item, ZoneItem):
+            menu.addAction(mw.actions['zones'])
+        else:
+            for name in ('copy', 'cut', 'duplicate', 'raise', 'lower'):
+                action = mw.actions.get(name)
+                if action is not None and action.isEnabled():
+                    menu.addAction(action)
+            menu.addSeparator()
+            delete = menu.addAction(GetIcon('delete'), 'Delete')
+            delete.triggered.connect(lambda: QtWidgets.QApplication.sendEvent(
+                mw, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)))
+        menu.exec_(event.globalPos())
+
     def showZoneMenu(self, event):
         """
         Ctrl + right click on a zone: background preview options.
@@ -4847,7 +5228,7 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
         return True
 
-    def mousePressEvent(self, event):
+    def classicMousePressEvent(self, event):
         """
         Overrides mouse pressing events if needed
         """
@@ -5502,7 +5883,7 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         else:
             globals.app.changeOverrideCursor(cursor)
 
-    def mouseMoveEvent(self, event):
+    def classicMouseMoveEvent(self, event):
         """
         Overrides mouse movement events if needed
         """
@@ -5905,7 +6286,7 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
         QtWidgets.QGraphicsView.mouseMoveEvent(self, event)
 
-    def mouseReleaseEvent(self, event):
+    def classicMouseReleaseEvent(self, event):
         """
         Overrides mouse release events if needed
         """

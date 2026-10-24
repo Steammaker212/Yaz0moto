@@ -1,16 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Cavern"
-		creator="RoadrunnerWMC"
 		version="1.0"
+		creator="RoadrunnerWMC"
 		description="This theme can help you visualize underground levels."
-		style="Fusion"
-		forceUiColor="true"
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#8C7BFF" />
+		<var name="background" value="#1A1A30" />
+		<var name="text" value="#E8E8F4" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	<icons size="sm" folder="icosm" />
-	<icons size="lg" folder="icolg" />
-	
+
 </theme>

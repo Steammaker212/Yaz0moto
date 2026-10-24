@@ -1,14 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Sky"
 		version="1.0"
 		creator="RoadrunnerWMC"
 		description="This theme can help you visualize sky levels."
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#3F7BFF" />
+		<var name="background" value="#EAF1FF" />
+		<var name="text" value="#1E2A44" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	<icons size="sm" folder="icosm" />
-	<icons size="lg" folder="icolg" />
-	
+
 </theme>

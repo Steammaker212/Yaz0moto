@@ -27,6 +27,7 @@ if not hasattr(QtWidgets.QGraphicsItem, 'ItemSendsGeometryChanges'):
 
 from . import globals
 from . import spritelib as SLib
+from .bytes import to_bytes
 #from sprites import SpriteImage_LiquidOrFog
 from .tileset import RenderObject
 from .ui import GetIcon

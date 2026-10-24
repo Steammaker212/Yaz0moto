@@ -1,0 +1,84 @@
+<?xml version="1.0"?>
+<!--
+    A template: ${name} values come from the theme's accent, background and text (see
+    miyamoto/themevars.py). Entrances stay red, paths green, locations purple and comments
+    yellow in every theme, so they keep their meaning.
+-->
+<colors>
+    <!-- Level view -->
+    <color id="bg"                       value="${level}"      />
+    <color id="grid"                     value="#FFFFFF26"     />
+    <color id="zone_lines"               value="${accent}B4"   />
+    <color id="zone_corner"              value="${accent}"     />
+    <color id="zone_text"                value="${text}"       />
+    <color id="zone_dark_fill"           value="#00000040"     />
+    <color id="zone_entrance_helper"     value="${accent}50"   />
+    <color id="object_fill_s"            value="${accent}30"   />
+    <color id="object_lines_s"           value="${accent_light}" />
+    <color id="sprite_fill_s"            value="${accent}30"   />
+    <color id="sprite_lines_s"           value="${accent_light}" />
+    <color id="spritebox_fill"           value="${accent}66"   />
+    <color id="spritebox_fill_s"         value="${accent}E6"   />
+    <color id="spritebox_lines"          value="#1B1B1E"       />
+    <color id="spritebox_lines_s"        value="#FFFFFF"       />
+    <color id="entrance_fill"            value="#E5484D80"     />
+    <color id="entrance_fill_s"          value="#E5484DF0"     />
+    <color id="entrance_lines"           value="#1B1B1E"       />
+    <color id="entrance_lines_s"         value="#FFFFFF"       />
+    <color id="location_fill"            value="#8E6CEF40"     />
+    <color id="location_fill_s"          value="#8E6CEF80"     />
+    <color id="location_lines"           value="#B9A3FF"       />
+    <color id="location_lines_s"         value="#FFFFFF"       />
+    <color id="location_text"            value="#FFFFFF"       />
+    <color id="path_connector"           value="#3DD68C"       />
+    <color id="path_fill"                value="#3DD68C80"     />
+    <color id="path_fill_s"              value="#3DD68CF0"     />
+    <color id="path_lines"               value="#1B1B1E"       />
+    <color id="path_lines_s"             value="#FFFFFF"       />
+    <color id="nabbit_path_connector"    value="#A879FF"       />
+    <color id="nabbit_path_fill"         value="#A879FF80"     />
+    <color id="nabbit_path_fill_s"       value="#A879FFF0"     />
+    <color id="nabbit_path_lines"        value="#1B1B1E"       />
+    <color id="nabbit_path_lines_s"      value="#FFFFFF"       />
+    <color id="comment_fill"             value="#FFD86680"     />
+    <color id="comment_fill_s"           value="#FFE9A6F0"     />
+    <color id="comment_lines"            value="#FFD866C0"     />
+    <color id="comment_lines_s"          value="#FFD866"       />
+    <color id="smi"                      value="#FFFFFF40"     />
+
+    <!-- Level overview -->
+    <color id="overview_entrance"        value="#E5484D"       />
+    <color id="overview_location_fill"   value="#8E6CEF40"     />
+    <color id="overview_location_lines"  value="#B9A3FF"       />
+    <color id="overview_object"          value="${text}"       />
+    <color id="overview_sprite"          value="${accent}"     />
+    <color id="overview_viewbox"         value="${accent_light}" />
+    <color id="overview_zone_fill"       value="${accent}14"   />
+    <color id="overview_zone_lines"      value="${accent}"     />
+
+    <!-- Window colours (Qt palette) -->
+    <color id="ui"                       value="${window}"     />
+    <color id="palette_window"           value="${window}"     />
+    <color id="palette_windowtext"       value="${text}"       />
+    <color id="palette_base"             value="${field}"      />
+    <color id="palette_alternatebase"    value="${field_alt}"  />
+    <color id="palette_text"             value="${text}"       />
+    <color id="palette_button"           value="${raised}"     />
+    <color id="palette_buttontext"       value="${text}"       />
+    <color id="palette_brighttext"       value="#FFFFFF"       />
+    <color id="palette_highlight"        value="${accent}"     />
+    <color id="palette_highlightedtext"  value="${on_accent}"  />
+    <color id="palette_tooltipbase"      value="${raised}"     />
+    <color id="palette_tooltiptext"      value="${text}"       />
+    <color id="palette_link"             value="${accent_light}" />
+    <color id="palette_linkvisited"      value="${accent}"     />
+    <color id="palette_placeholdertext"  value="${disabled}"   />
+    <color id="palette_light"            value="${line}"       />
+    <color id="palette_midlight"         value="${edge_light}" />
+    <color id="palette_mid"              value="${muted}"      />
+    <color id="palette_dark"             value="${edge_dark}"  />
+    <color id="palette_shadow"           value="#000000"       />
+    <color id="palettedisabled_windowtext" value="${disabled}" />
+    <color id="palettedisabled_text"       value="${disabled}" />
+    <color id="palettedisabled_buttontext" value="${disabled}" />
+</colors>

@@ -613,6 +613,23 @@ def mask_max_value(mask):
     return mask >> mask_shift(mask)
 
 
+def encodeMetadataText(text):
+    """Text stored in level metadata (titles, comments...), as a list of bytes (UTF-8)."""
+    return list(text.encode('utf-8'))
+
+
+def decodeMetadataText(data):
+    """
+    Reads text stored in level metadata. Older versions stored one byte per character
+    (Latin-1), which is usually not valid UTF-8, so that is the fallback.
+    """
+    data = bytes(data)
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        return data.decode('latin-1')
+
+
 class Metadata:
     """
     Class for the new level metadata system
@@ -697,9 +714,7 @@ class Metadata:
         """
         data = self.otherData(key, 1)
         if data is None: return
-        s = ''
-        for d in data: s += chr(d)
-        return s
+        return decodeMetadataText(data)
 
     def otherData(self, key, type):
         """
@@ -719,9 +734,7 @@ class Metadata:
         """
         Sets string data, overwriting any existing string data with that key
         """
-        data = []
-        for char in value: data.append(ord(char))
-        self.setOtherData(key, 1, data)
+        self.setOtherData(key, 1, encodeMetadataText(value))
 
     def setOtherData(self, key, type, value):
         """

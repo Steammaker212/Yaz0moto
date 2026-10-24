@@ -1,12 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Volcano"
 		version="1.0"
 		creator="RoadrunnerWMC"
 		description="This theme can help you visualize volcano levels."
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#E0471B" />
+		<var name="background" value="#E6E1E0" />
+		<var name="text" value="#2B1D18" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	
+
 </theme>

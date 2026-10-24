@@ -5002,10 +5002,6 @@ class PiecesModel(QtCore.QAbstractListModel):
 
         self.pixmaps = []
 
-    def supportedDragActions(self):
-        super().supportedDragActions()
-        return Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
@@ -5165,6 +5161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         fileMenu = menubar.addMenu("&File")
         fileMenu.addAction("Import Tileset from file...", self.openTilesetfromFile, QtGui.QKeySequence.Open)
         fileMenu.addAction("Export Tileset...", self.saveTilesetAs, QtGui.QKeySequence.SaveAs)
+        fileMenu.addAction("Export All Tilesets...", self.exportAllTilesets)
         fileMenu.addSeparator()
         fileMenu.addAction("Save", self.saveCurrentTileset, QtGui.QKeySequence.Save)
         fileMenu.addAction("Quit", self.close, QtGui.QKeySequence('Ctrl+Q'))
@@ -5187,6 +5184,40 @@ class MainWindow(QtWidgets.QMainWindow):
         objMenu.addSeparator()
         objMenu.addAction("Delete All Objects", self.clearObjects, QtGui.QKeySequence('Ctrl+Alt+Backspace'))
         objMenu.addAction("Clear Collision Data", self.clearCollisions, QtGui.QKeySequence('Ctrl+Shift+Backspace'))
+
+    def exportAllTilesets(self):
+        """
+        Exports every open tileset (with any unsaved changes) into one folder.
+        Empty slots are skipped unless something was added to them.
+        """
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Export All Tilesets', str(misc.setting('LastTilesetExportDir', '')))
+        if not folder:
+            return
+        misc.setSetting('LastTilesetExportDir', folder)
+
+        written, failed = [], []
+        for editor in self.editors:
+            if editor.con and not editor.isDirty:
+                continue
+            name = 'Pa%d_new' % editor.slot if editor.con else editor.name
+            path = os.path.join(folder, name + ('.szs' if globals.IsNSMBUDX else '.sarc'))
+            try:
+                if globals.IsNSMBUDX:
+                    WriteTilesetFileDX(name, editor.saving(name), path)
+                else:
+                    yaz0.writeFile(path, editor.saving(name))
+                written.append(os.path.basename(path))
+            except (OSError, ValueError) as e:
+                failed.append('%s: %s' % (name, e))
+
+        message = 'Exported %d tileset(s) to:\n%s' % (len(written), folder)
+        if written:
+            message += '\n\n' + '\n'.join(written)
+        if failed:
+            QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', message + '\n\nCould not export:\n' + '\n'.join(failed))
+        else:
+            QtWidgets.QMessageBox.information(self, 'Export All Tilesets', message)
 
     def saveCurrentTileset(self):
         editor = self.tabs.currentWidget()

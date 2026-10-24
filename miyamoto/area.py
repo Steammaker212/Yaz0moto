@@ -24,7 +24,7 @@ from .items import SpriteItem, EntranceItem, PathItem
 from .items import NabbitPathItem, CommentItem
 
 from .loading import LoadTileset
-from .misc import Metadata
+from .misc import Metadata, decodeMetadataText
 from . import spritelib as SLib
 from .id_manager import remap_course_sprite_types
 from .structures import Structures, GetFormat as GetStructureFormat
@@ -509,6 +509,7 @@ class Area_NSMBU(AbstractArea):
 
             if data[0] == 90:
                 self.LoadNabbitPath(data)
+                offset += 12
                 continue
 
             nodes = self.LoadPathNodes(data[2], data[3])
@@ -608,10 +609,8 @@ class Area_NSMBU(AbstractArea):
             tlen |= b[idx + 2] << 8
             tlen |= b[idx + 3]
             idx += 4
-            s = ''
-            for char in range(tlen):
-                s += chr(b[idx])
-                idx += 1
+            s = decodeMetadataText(b[idx:idx + tlen])
+            idx += tlen
 
             com = CommentItem(xpos, ypos, s)
             com.listitem = QtWidgets.QListWidgetItem()
@@ -710,7 +709,8 @@ class Area_NSMBU(AbstractArea):
         nodeoffset = 0
         nodeindex = 0
         offset = 0
-        pathcount = len(self.pathdata)
+        # Paths without nodes are skipped below, so don't leave empty records for them
+        pathcount = sum(1 for path in self.pathdata if path['nodes'])
         if self.nPathdata:
             pathcount += 1
         buffer = bytearray(pathcount * 12)

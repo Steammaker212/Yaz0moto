@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<g transform="translate(0,0.9)"><path d="M2.8 12C5 7.8 8.3 5.5 12 5.5s7 2.3 9.2 6.5c-2.2 4.2-5.5 6.5-9.2 6.5S5 16.2 2.8 12z" fill="none" stroke="#000" stroke-opacity="0.3" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="#000" fill-opacity="0.3"/></g>
+<g transform="translate(0,1.7)"><path d="M2.8 12C5 7.8 8.3 5.5 12 5.5s7 2.3 9.2 6.5c-2.2 4.2-5.5 6.5-9.2 6.5S5 16.2 2.8 12z" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="#000" fill-opacity="0.14"/></g>
+<g transform="translate(0,2.5)"><path d="M2.8 12C5 7.8 8.3 5.5 12 5.5s7 2.3 9.2 6.5c-2.2 4.2-5.5 6.5-9.2 6.5S5 16.2 2.8 12z" fill="none" stroke="#000" stroke-opacity="0.06" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="#000" fill-opacity="0.06"/></g>
+<path d="M2.8 12C5 7.8 8.3 5.5 12 5.5s7 2.3 9.2 6.5c-2.2 4.2-5.5 6.5-9.2 6.5S5 16.2 2.8 12z" fill="none" stroke="#E9E9EC" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="#F7941D"/>
+</svg>

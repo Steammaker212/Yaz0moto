@@ -83,7 +83,8 @@ class Level_NSMBU(AbstractLevel):
     @staticmethod
     def _sarcEndianness():
         """
-        Byte order of the level archive: Switch (Deluxe) levels are little-endian
+        Byte order of the level archive: Switch (Deluxe) levels are little-endian. Retail
+        Deluxe levels use a big-endian SARC header, but the game reads either.
         """
         return '<' if globals.IsNSMBUDX else '>'
 
@@ -241,13 +242,14 @@ class Level_NSMBU(AbstractLevel):
 
         return self.id_manager.build_save_projection(used_types)
 
-    def save(self, innerfilename=None):
+    def save(self, innerfilename=None, saveTilesets=True):
         """
-        Save the level back to a file
+        Save the level back to a file. saveTilesets=False leaves edited tilesets alone
+        (autosave uses it: for Deluxe, saving a tileset writes into the game's Unit folder).
         """
 
         # Save all the tilesets before anything
-        if globals.TilesetEdited or misc.setting('OverrideTilesetSaving', False):
+        if saveTilesets and (globals.TilesetEdited or misc.setting('OverrideTilesetSaving', False)):
             if globals.Area.tileset1:
                 tilesetData = SaveTileset(1)
                 if tilesetData:

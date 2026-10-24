@@ -105,9 +105,6 @@ jobs:
             "import os, PyQt5; print(os.path.dirname(os.path.dirname(PyQt5.__file__)))")
           python buildtools/merge_pyqt5.py build/Yaz0moto.app "$PYQT5_PARENT"
 
-      - name: Ad-hoc sign bundle
-        run: codesign --force --deep --sign - build/Yaz0moto.app
-
       - name: Pre-package cleanup (flatten broken symlinks)
         run: |
           python - <<'EOF'
@@ -129,10 +126,31 @@ jobs:
           print("\nPre-package script successful.")
           EOF
 
+      # Signing must be the last change to the bundle: anything moved inside it
+      # afterwards breaks the signature, and macOS then calls the app damaged.
+      - name: Ad-hoc sign bundle
+        run: |
+          codesign --force --deep --sign - build/Yaz0moto.app
+          codesign --verify --deep --strict --verbose=2 build/Yaz0moto.app
+
+      # -y stores the bundle's symlinks as symlinks. Without it zip copies what they
+      # point to, which changes the signed bundle and breaks its signature.
       - name: Package macOS-universal.zip
         run: |
           V="${{ inputs.version }}"
-          cd build && zip -r -9 -X "../Yaz0moto-v${V}-macOS-universal.zip" Yaz0moto.app
+          cd build && zip -r -y -9 -X "../Yaz0moto-v${V}-macOS-universal.zip" Yaz0moto.app
+
+      - name: Check the zip unpacks to a correctly signed universal app
+        run: |
+          V="${{ inputs.version }}"
+          CHECK=$(mktemp -d)
+          ditto -x -k "Yaz0moto-v${V}-macOS-universal.zip" "$CHECK"
+          codesign --verify --deep --strict --verbose=2 "$CHECK/Yaz0moto.app"
+          INFO=$(lipo -info "$CHECK/Yaz0moto.app/Contents/MacOS/Yaz0moto")
+          echo "$INFO"
+          echo "$INFO" | grep -q x86_64
+          echo "$INFO" | grep -q arm64
+          echo "Symlinks kept in the bundle: $(find "$CHECK/Yaz0moto.app" -type l | wc -l)"
 
       - uses: actions/upload-artifact@v4
         with:

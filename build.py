@@ -164,7 +164,7 @@ setup(
             'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'bntxlib', 'bntxlib.bcn', 'miyamoto', 'requests', 'certifi'],
             # PyQt5 loads its OpenGL function wrappers by name at runtime, so cx_Freeze
             # can't see them: the live background (miyamoto/dvgl.py) needs this one
-            'includes': ['fastyz', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0'],
+            'includes': ['fastyz', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0', 'PyQt5.QtSvg'],
             'build_exe': dir_,
             'optimize': 2,
             'silent': True,

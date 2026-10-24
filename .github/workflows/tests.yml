@@ -3,6 +3,8 @@ name: Tests
 # Quick checks that run on every push to deluxe-support and on pull requests:
 #   - deluxe_smoke_test.py: Deluxe levels, tilesets and the tileset editor (round trips)
 #   - branding_test.py:     name/updater/build/CI consistency (the updater must never point at another project)
+#   - regression_test.py:   fixes from the v1.0.0 review (paths, text, saving, update packages)
+#   - studio_tools_test.py: Check Level rules and metrics, Export Mod Package, undo history, movement preview, release tags
 
 on:
   push:
@@ -45,3 +47,13 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests/branding_test.py
+
+      - name: Level checker, mod export and undo history
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/studio_tools_test.py
+
+      - name: Regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/regression_test.py

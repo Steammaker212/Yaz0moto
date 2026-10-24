@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<g transform="translate(0,0.9)"><path d="M19.5 12a7.5 7.5 0 1 1-7.5-7.5" fill="none" stroke="#000" stroke-opacity="0.3" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><polygon points="12,1.2 12,7.8 16.4,4.5" fill="#000" fill-opacity="0.3"/><circle cx="12" cy="12" r="2.2" fill="#000" fill-opacity="0.3"/></g>
+<g transform="translate(0,1.7)"><path d="M19.5 12a7.5 7.5 0 1 1-7.5-7.5" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><polygon points="12,1.2 12,7.8 16.4,4.5" fill="#000" fill-opacity="0.14"/><circle cx="12" cy="12" r="2.2" fill="#000" fill-opacity="0.14"/></g>
+<g transform="translate(0,2.5)"><path d="M19.5 12a7.5 7.5 0 1 1-7.5-7.5" fill="none" stroke="#000" stroke-opacity="0.06" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><polygon points="12,1.2 12,7.8 16.4,4.5" fill="#000" fill-opacity="0.06"/><circle cx="12" cy="12" r="2.2" fill="#000" fill-opacity="0.06"/></g>
+<path d="M19.5 12a7.5 7.5 0 1 1-7.5-7.5" fill="none" stroke="#E9E9EC" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><polygon points="12,1.2 12,7.8 16.4,4.5" fill="#F7941D"/><circle cx="12" cy="12" r="2.2" fill="#F7941D"/>
+</svg>

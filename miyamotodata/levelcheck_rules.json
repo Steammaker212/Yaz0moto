@@ -1,0 +1,60 @@
+{
+    "_readme": "Rules for Tools > Check Level. To change them, use 'Edit rules...' in the Check Level window: it creates a copy in your user data folder, and any key you set there overrides this file. Severity is error, warning or info. Every check can be turned off with \"enabled\": false.",
+
+    "checks": {
+        "start_entrance_missing": {"severity": "error"},
+        "duplicate_entrance_id": {"severity": "error"},
+        "warp_destination_missing": {
+            "severity": "error",
+            "_entrance_types": "Entrance types the player can go into: door, pipes, mini pipes, vine, pipe towards the screen.",
+            "entrance_types": [2, 3, 4, 5, 6, 16, 17, 18, 19, 21, 22]
+        },
+        "entrance_outside_zone": {"severity": "warning"},
+        "sprite_outside_zone": {
+            "severity": "warning",
+            "_margin": "How far outside a zone (in level units, 16 per tile) a sprite may be before it is reported.",
+            "margin": 64
+        },
+        "zone_overlap": {"severity": "warning"},
+        "empty_area": {"severity": "warning"},
+        "star_coin_count": {"severity": "warning", "expected": 3, "warn_if_none": false},
+        "star_coin_duplicate_number": {"severity": "warning"},
+        "checkpoint_count": {"severity": "warning", "max": 1},
+        "no_goal": {"severity": "info"},
+        "id_reference_missing": {
+            "severity": "warning",
+            "_id_types": "ID fields (id_type in spritedata.xml) that must point at something that exists in the same area. ID 0 is the usual 'not set' value.",
+            "id_types": {
+                "path": {"zero_is_unset": true},
+                "location": {"zero_is_unset": true},
+                "entrance": {"zero_is_unset": true}
+            }
+        },
+        "id_used_once": {
+            "severity": "info",
+            "_id_types": "Linking IDs that do nothing unless at least two sprites share them.",
+            "id_types": ["movement", "event", "pair", "sync"]
+        },
+        "path_too_short": {"severity": "warning", "min_nodes": 2},
+        "duplicate_sprite": {"severity": "warning"},
+        "enemy_over_pit": {"severity": "warning"},
+        "location_unused": {"severity": "info", "enabled": false}
+    },
+
+    "sprites": {
+        "star_coins": [45, 46, 47, 48, 480, 607, 650, 665, 721],
+        "numbered_star_coins": [45, 46, 47, 48, 480, 607, 650, 665, 721],
+        "checkpoints": [25],
+        "_level_ends": "Goal Pole, boss fights and their controllers.",
+        "level_ends": [31, 206, 216, 223, 225, 230, 245, 246, 296, 302, 317, 368, 383, 385, 389, 399, 403, 406,
+                       411, 412, 432, 433, 435, 459, 462, 466, 473, 477, 497, 520, 558, 570],
+        "_ground_enemies": "Walking enemies that fall if nothing is below them.",
+        "ground_enemies": [0, 19, 22, 23, 55, 75, 76, 77, 78, 79, 137, 138, 164, 247, 255, 471, 472, 476, 606],
+        "ignore_outside_zone": []
+    },
+
+    "metrics": {
+        "enemies": {"view": "Enemies"},
+        "coins": {"category": "Coins"}
+    }
+}

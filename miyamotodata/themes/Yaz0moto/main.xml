@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!--
+    The Yaz0moto theme, and the base of the other themes: they set base="Yaz0moto" and
+    their own <variables> (accent, background, text, level, roundness). The style sheet,
+    level colours and icons here are templates filled in from those values.
+-->
+<theme
+		format="1.0"
+		name="Yaz0moto"
+		version="1.0"
+		creator="Yaz0moto"
+		description="Flat charcoal and orange, after the Yaz0moto logo, with minimal icons."
+		style="Fusion"
+		>
+
+	<variables>
+		<var name="accent"     value="#F7941D" />
+		<var name="background" value="#1C1C1F" />
+		<var name="text"       value="#ECECEF" />
+		<var name="level"      value="#1E1E22" />
+		<var name="roundness"  value="10" />
+	</variables>
+
+	<colors file="levelview.xml" />
+	<qss file="style.qss" />
+	<icons size="sm" folder="icons" />
+	<icons size="lg" folder="icons" />
+
+</theme>

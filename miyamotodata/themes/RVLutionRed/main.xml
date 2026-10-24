@@ -1,12 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="RVLution Red"
 		version="1.0"
 		creator="RoadrunnerWMC"
 		description="Matches the default theme of RVLution.net."
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#C0392B" />
+		<var name="background" value="#EEE5E5" />
+		<var name="text" value="#2A2020" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	
+
 </theme>

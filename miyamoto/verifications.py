@@ -37,18 +37,16 @@ def checkContent(data):
 
 def IsNSMBLevel(filename):
     """
-    Does some basic checks to confirm a file is a NSMB level
+    Does some basic checks to confirm a file is a NSMB level. Yaz0-compressed files
+    (Wii U .szs) can't be looked into without decompressing them, so they are accepted
+    and checked when they are opened.
     """
-    return True
     if not os.path.isfile(filename): return False
 
-    f = open(filename, 'rb')
-    data = f.read()
-    f.close()
-    del f
+    with open(filename, 'rb') as f:
+        data = f.read()
 
-    if checkContent(data):
-        return True
+    return data.startswith(b'Yaz0') or checkContent(data)
 
 
 def SetDirty(noautosave=False):

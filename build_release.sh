@@ -35,9 +35,12 @@ if [[ "$(uname)" == "Darwin" ]]; then
     echo "==> macOS: building universal app bundle + updater zip"
     export ARCHFLAGS="${ARCHFLAGS:--arch x86_64 -arch arm64}"
     .venv/bin/python3 build.py build_ext --inplace bdist_mac
+    echo "==> Signing app bundle (ad-hoc)..."
+    codesign --force --deep --sign - build/Yaz0moto.app
     echo "==> Packaging app bundle as zip..."
     ARCH=$(uname -m)
-    cd build && zip -r "../Yaz0moto-v${VERSION}-macOS-${ARCH}.zip" Yaz0moto.app && cd ..
+    # -y keeps the bundle's symlinks; copying them instead breaks the signature
+    cd build && zip -r -y -X "../Yaz0moto-v${VERSION}-macOS-${ARCH}.zip" Yaz0moto.app && cd ..
     echo "==> Done. Zip: Yaz0moto-v${VERSION}-macOS-${ARCH}.zip"
 else
     echo "==> Linux/Windows: building frozen executable"

@@ -1,15 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Dark Red"
 		version="1.0"
-		description="A dark-colored RVLution Red."
 		creator="Baron Stijn, RoadrunnerWMC"
-		forceUiColor="true"
+		description="A dark-colored RVLution Red."
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#E0474C" />
+		<var name="background" value="#2A2A2A" />
+		<var name="text" value="#EDEDED" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	<icons size="sm" folder="icosm" />
-	<icons size="lg" folder="icolg" />
-	
+
 </theme>

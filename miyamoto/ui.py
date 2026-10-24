@@ -20,7 +20,86 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
 
 from . import globals
+from . import themevars
 from .misc import setting
+
+try:
+    from PyQt5 import QtSvg
+except ImportError:  # SVG icons then fall back to the default ones
+    QtSvg = None
+
+# Sizes SVG icons are drawn at (Qt picks the closest for each use)
+_SVG_SIZES_SM = (16, 20, 24, 32, 40, 48)
+_SVG_SIZES_LG = (32, 48, 64, 96, 128)
+
+
+def themeImages(variables):
+    """
+    The folder of the style sheet images (check marks, arrows) drawn in a theme's colours,
+    made once per set of colours in the user data folder. None if they can't be drawn.
+    """
+    if QtSvg is None:
+        return None
+    import hashlib
+    key = hashlib.sha1(repr(sorted(variables.items())).encode()).hexdigest()[:12]
+    folder = os.path.join(globals.user_data_path, 'cache', 'theme-images', key)
+    if all(os.path.isfile(os.path.join(folder, name + '.png')) for name in themevars.IMAGE_SVGS):
+        return folder
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for name in themevars.IMAGE_SVGS:
+            renderer = QtSvg.QSvgRenderer(QtCore.QByteArray(themevars.image_svg(name, variables).encode('utf-8')))
+            for scale, suffix in ((1, ''), (2, '@2x')):
+                image = QtGui.QImage(16 * scale, 16 * scale, QtGui.QImage.Format_ARGB32_Premultiplied)
+                image.fill(QtCore.Qt.transparent)
+                painter = QtGui.QPainter(image)
+                painter.setRenderHint(QtGui.QPainter.Antialiasing)
+                renderer.render(painter)
+                painter.end()
+                image.save(os.path.join(folder, name + suffix + '.png'))
+    except OSError:
+        return None
+    return folder
+
+
+class _LazySvgIcon:
+    """An SVG theme icon that hasn't been drawn yet."""
+    def __init__(self, path, big, variables=None):
+        self.path, self.big, self.variables = path, big, variables
+
+
+def svgIcon(path, big=False, variables=None):
+    """
+    An icon drawn from an SVG file at several sizes, or None if it can't be drawn.
+    With a theme's variables, the icon's default colours are swapped for the theme's.
+    """
+    if QtSvg is None:
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            svg = f.read()
+    except OSError:
+        return None
+    if variables:
+        svg = themevars.recolor_svg(svg, variables)
+    renderer = QtSvg.QSvgRenderer(QtCore.QByteArray(svg.encode('utf-8')))
+    if not renderer.isValid():
+        return None
+
+    icon = QtGui.QIcon()
+    for size in (_SVG_SIZES_LG if big else _SVG_SIZES_SM):
+        image = QtGui.QImage(size, size, QtGui.QImage.Format_ARGB32_Premultiplied)
+        image.fill(QtCore.Qt.transparent)
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+        renderer.render(painter)
+        painter.end()
+        pixmap = QtGui.QPixmap.fromImage(image)
+        # The same picture when selected/hovered, rather than one tinted with the highlight colour
+        for mode in (QtGui.QIcon.Normal, QtGui.QIcon.Active, QtGui.QIcon.Selected):
+            icon.addPixmap(pixmap, mode)
+    return icon
 
 #################################
 
@@ -90,6 +169,9 @@ class MiyamotoTheme:
         self.style = None
         self.forceUiColor = False
         self.forceStyleSheet = False
+        self.folder = None
+        self.variableInputs = {}
+        self.variables = None
 
         # Add the colours                                             # Descriptions:
         self.colors = {
@@ -144,11 +226,11 @@ class MiyamotoTheme:
 
     def initFromFolder(self, folder):
         """
-        Initializes the theme from the folder
+        Initializes the theme from the folder. A theme with base="..." in its main.xml
+        is built on that theme: the base's files are loaded first, filled in with this
+        theme's <variables>, then this theme's own files are applied on top.
         """
         folder = resolveThemeFolder(folder)
-
-        fileList = os.listdir(folder)
 
         # Create a XML ElementTree
         maintree = etree.parse(os.path.join(folder, 'main.xml'))
@@ -159,7 +241,28 @@ class MiyamotoTheme:
             # The attributes are messed up
             return
 
-        # Parse the other nodes
+        layers = []
+        inputs = {}
+        base = root.attrib.get('base')
+        if base and base != os.path.basename(folder):
+            baseFolder = resolveThemeFolder(base)
+            baseRoot = etree.parse(os.path.join(baseFolder, 'main.xml')).getroot()
+            inputs.update(themevars.parse_variables(baseRoot))
+            layers.append((baseFolder, baseRoot))
+        inputs.update(themevars.parse_variables(root))
+        layers.append((folder, root))
+
+        self.folder = folder
+        self.variableInputs = inputs
+        self.variables = themevars.derive(inputs) if inputs else None
+
+        for layerFolder, layerRoot in layers:
+            self.loadNodes(layerFolder, layerRoot)
+
+    def loadNodes(self, folder, root):
+        """
+        Loads the colours, style sheet and icons listed in a main.xml
+        """
         for node in root:
             if node.tag.lower() == 'colors':
                 if 'file' not in node.attrib: continue
@@ -179,21 +282,25 @@ class MiyamotoTheme:
                 foldername = node.attrib['folder']
                 big = node.attrib['size'].lower()[:2] == 'lg'
                 cache = self.iconCacheLg if big else self.iconCacheSm
+                iconFolder = os.path.join(folder, foldername)
+                if not os.path.isdir(iconFolder): continue
 
-                # Load the icons
-                for iconfilename in fileList:
-                    iconname = iconfilename
-                    if not iconname.startswith(foldername + '/'): continue
-                    iconname = iconname[len(foldername) + 1:]
-                    if len(iconname) <= len('icon-.png'): continue
-                    if not iconname.startswith('icon-') or not iconname.endswith('.png'): continue
-                    iconname = iconname[len('icon-'): -len('.png')]
+                # Load the icons: icon-<name>.png, or icon-<name>.svg (drawn sharp at every size)
+                for iconfilename in os.listdir(iconFolder):
+                    stem, ext = os.path.splitext(iconfilename)
+                    if not stem.startswith('icon-') or len(stem) <= len('icon-'): continue
+                    iconname = stem[len('icon-'):]
+                    path = os.path.join(iconFolder, iconfilename)
 
-                    with open(os.path.join(folder, iconfilename), "rb") as inf:
-                        icodata = inf.read()
-                    pix = QtGui.QPixmap()
-                    if not pix.loadFromData(icodata): continue
-                    ico = QtGui.QIcon(pix)
+                    if ext.lower() == '.svg':
+                        if QtSvg is None: continue
+                        ico = _LazySvgIcon(path, big, self.variables)  # drawn when first used
+                    elif ext.lower() == '.png':
+                        pix = QtGui.QPixmap(path)
+                        if pix.isNull(): continue
+                        ico = QtGui.QIcon(pix)
+                    else:
+                        continue
 
                     cache[iconname] = ico
 
@@ -263,11 +370,14 @@ class MiyamotoTheme:
         Loads a colors.xml file
         """
         try:
-            tree = etree.parse(file)
+            with open(file, encoding='utf-8') as f:
+                text = f.read()
+            if self.variables:
+                text = themevars.substitute(text, self.variables)
+            root = etree.fromstring(text.encode('utf-8'))
         except Exception:
             return
 
-        root = tree.getroot()
         if root.tag.lower() != 'colors': return False
 
         colorDict = {}
@@ -313,10 +423,20 @@ class MiyamotoTheme:
         """
         Loads a style.qss file
         """
-        with open(file) as inf:
+        with open(file, encoding='utf-8') as inf:
             style = inf.read()
 
-        self.styleSheet = style
+        if self.variables:
+            style = themevars.substitute(style, self.variables)
+
+        # Style sheets can point at their own folder ({theme}) and at the check marks and
+        # arrows drawn in the theme's colours ({images}); a theme built on another adds its
+        # own style sheet after the base's
+        folder = os.path.dirname(os.path.abspath(file))
+        images = themeImages(self.variables) if self.variables else None
+        style = style.replace('{images}', (images or os.path.join(folder, 'images')).replace('\\', '/'))
+        style = style.replace('{theme}', folder.replace('\\', '/'))
+        self.styleSheet = (self.styleSheet + '\n' + style) if self.styleSheet else style
 
     def color(self, name):
         """
@@ -334,6 +454,13 @@ class MiyamotoTheme:
         """
 
         cache = self.iconCacheLg if big else self.iconCacheSm
+
+        if isinstance(cache.get(name), _LazySvgIcon):
+            icon = svgIcon(cache[name].path, cache[name].big, cache[name].variables)
+            if icon is not None:
+                cache[name] = icon
+            else:
+                del cache[name]
 
         if name not in cache:
             ico_dir = os.path.join(globals.miyamoto_path, 'miyamotodata', 'ico', 'lg' if big else 'sm')
@@ -406,11 +533,23 @@ def SetAppStyle(styleKey=''):
         for role in (QtGui.QPalette.Active, QtGui.QPalette.Inactive, QtGui.QPalette.Disabled):
             palette.setColor(role, QtGui.QPalette.ButtonText, btn_text_color)
 
+    # Themes can set any palette colour: palette_<role> (e.g. palette_highlight), and
+    # palettedisabled_<role> for disabled widgets
+    roles = {name.lower(): value for name, value in vars(QtGui.QPalette).items()
+             if isinstance(value, QtGui.QPalette.ColorRole)}
+    for key, color in globals.theme.colors.items():
+        if key.startswith('palette_') and key[8:] in roles:
+            for group in (QtGui.QPalette.Active, QtGui.QPalette.Inactive):
+                palette.setColor(group, roles[key[8:]], color)
+            if 'palettedisabled_' + key[8:] not in globals.theme.colors:
+                palette.setColor(QtGui.QPalette.Disabled, roles[key[8:]], color)
+        elif key.startswith('palettedisabled_') and key[16:] in roles:
+            palette.setColor(QtGui.QPalette.Disabled, roles[key[16:]], color)
+
     globals.app.setPalette(palette)
 
-    # Apply the style sheet, if exists
-    if globals.theme.styleSheet:
-        globals.app.setStyleSheet(globals.theme.styleSheet)
+    # Apply the theme's style sheet (an empty one clears the previous theme's)
+    globals.app.setStyleSheet(globals.theme.styleSheet or '')
 
     # Manually set the background color
     if globals.theme.forceUiColor and not globals.theme.forceStyleSheet:
@@ -449,6 +588,18 @@ def LoadNumberFont():
         globals.NumberFont = QtGui.QFont('Lucida Grande', round((9 / 24) * globals.TileWidth))
     else:
         globals.NumberFont = QtGui.QFont('Sans',          round((8 / 24) * globals.TileWidth))
+
+
+TOOLBAR_ICON_SIZES = (16, 20, 24, 32, 40)
+
+
+def toolbarIconSize():
+    """The size of the main toolbar's icons, in pixels (Preferences > Themes)."""
+    try:
+        size = int(setting('ToolbarIconSize', 24))
+    except (TypeError, ValueError):
+        size = 24
+    return size if size in TOOLBAR_ICON_SIZES else 24
 
 
 def GetIcon(name, big=False):

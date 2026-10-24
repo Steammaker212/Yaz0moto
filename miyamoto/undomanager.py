@@ -117,6 +117,13 @@ class UndoManager(QtCore.QObject):
             self._update_ui()
             self._on_action_completed(initial_push=False)
 
+    def jump_to(self, count):
+        """Undoes or redoes until `count` commands are on the undo stack."""
+        while len(self.undo_stack) > count and self.canUndo():
+            self.undo()
+        while len(self.undo_stack) < count and self.canRedo():
+            self.redo()
+
     def _on_action_completed(self, initial_push=False):
         """Handles post-action cleanup and UI refreshes."""
         if not hasattr(globals, 'mainWindow') or not globals.mainWindow:

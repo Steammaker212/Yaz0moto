@@ -1,13 +1,21 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Neon"
 		version="1.0"
 		creator="RoadrunnerWMC"
 		description="A very dark theme with brightly colored accents."
-		forceUiColor="true"
+		base="Yaz0moto"
 		>
-		
+
+	<variables>
+		<var name="accent" value="#6EC0FF" />
+		<var name="background" value="#0E0E10" />
+		<var name="text" value="#F0F0F0" />
+	</variables>
+
+	<!-- This theme's own level view colours -->
 	<colors file="levelview.xml" />
-	
+
 </theme>

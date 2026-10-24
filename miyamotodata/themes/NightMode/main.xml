@@ -1,13 +1,19 @@
 <?xml version="1.0"?>
+<!-- Built on the Yaz0moto theme: its shapes and icons in this theme's colours. -->
 <theme
 		format="1.0"
 		name="Night Mode"
-		creator="Explos"
 		version="2.0"
+		creator="Explos"
 		description="Night Mode from CoinKiller."
-		forceStyleSheet="true"
+		base="Yaz0moto"
 		>
-		
-	<qss file="style.qss" />
-	
+
+	<variables>
+		<var name="accent" value="#2F8EFF" />
+		<var name="background" value="#242424" />
+		<var name="text" value="#E6E6E6" />
+		<var name="level" value="#212121" />
+	</variables>
+
 </theme>

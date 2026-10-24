@@ -39,6 +39,15 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Releasing version: $VERSION"
 
+      # The build writes this version into project.json, and the updater compares it
+      # numerically, so anything but X.Y.Z would publish a release users never get.
+      - name: Check the version format
+        run: |
+          if ! echo "${{ steps.ver.outputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'${{ steps.ver.outputs.version }}' is not a version like 1.2.3 (tags must look like v1.2.3)."
+            exit 1
+          fi
+
       - name: Verify critical imports and entry points
         run: |
           python - <<'EOF'

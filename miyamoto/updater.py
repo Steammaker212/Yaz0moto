@@ -6,6 +6,7 @@
 import hashlib
 import os
 import platform
+import posixpath
 import re
 import shlex
 import shutil
@@ -119,6 +120,16 @@ def _fetch_json(url):
         raise UpdateError('GitHub returned an invalid update response.') from exc
 
 
+def version_from_tag(tag):
+    """
+    The version number in a release tag: 'v1.2.0', 'release-1.2.0' and
+    'Yaz0moto-v1.2.0' all give '1.2.0'. Other tags are returned stripped.
+    """
+    tag = tag.strip()
+    match = re.fullmatch(r'(?:yaz0moto[-_ ]?)?(?:release[-_ ]?)?v?(\d+(?:\.\d+)*)', tag, re.IGNORECASE)
+    return match.group(1) if match else tag
+
+
 def _release_from_json(data, channel):
     if not isinstance(data, dict):
         raise UpdateError('GitHub returned an invalid release record.')
@@ -133,7 +144,7 @@ def _release_from_json(data, channel):
         and isinstance(asset.get('name'), str)
         and isinstance(asset.get('browser_download_url'), str)
     ))
-    version = tag[1:] if channel == CHANNEL_RELEASE and tag.lower().startswith('v') else tag
+    version = version_from_tag(tag) if channel == CHANNEL_RELEASE else tag
     if channel == CHANNEL_NIGHTLY:
         match = re.search(r'-([0-9a-fA-F]{7,40})$', tag)
         if match:
@@ -256,20 +267,43 @@ def _safe_extract(zip_path, destination):
         raise UpdateError('Downloaded update is not a valid ZIP file.') from exc
 
     with archive:
+        links = {}
         for info in archive.infolist():
             name = info.filename.replace('\\', '/')
             parts = PurePosixPath(name).parts
             mode = info.external_attr >> 16
             if (not name or name.startswith('/') or '..' in parts
-                    or (parts and ':' in parts[0]) or stat.S_ISLNK(mode)):
+                    or (parts and ':' in parts[0])):
                 raise UpdateError('Downloaded update contains an unsafe file path.')
+            if stat.S_ISLNK(mode):
+                links[name.rstrip('/')] = _safe_link_target(name, archive.read(info))
             total += info.file_size
             if total > _MAX_EXTRACTED_SIZE:
                 raise UpdateError('Downloaded update is unexpectedly large.')
 
+        # Nothing may be written through a symlink (a link to a folder followed by
+        # entries "inside" it could otherwise place files anywhere)
+        for info in archive.infolist():
+            parents = PurePosixPath(info.filename.replace('\\', '/')).parents
+            if any(str(parent) in links for parent in parents):
+                raise UpdateError('Downloaded update contains an unsafe file path.')
+
+        # Links may go through other links (frameworks do: Versions/Current), but not
+        # climb out with ".." after one, which could leave the folder once followed
+        for name, link_target in links.items():
+            path, through_link = posixpath.dirname(name), False
+            for part in link_target.split('/'):
+                if part == '..' and through_link:
+                    raise UpdateError('Downloaded update contains an unsafe file path.')
+                if part not in ('', '.'):
+                    path = posixpath.normpath(posixpath.join(path, part))
+                through_link = through_link or path in links
+
         for info in archive.infolist():
             name = info.filename.replace('\\', '/')
             target = destination.joinpath(*PurePosixPath(name).parts)
+            if name.rstrip('/') in links:
+                continue
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -279,6 +313,29 @@ def _safe_extract(zip_path, destination):
             mode = (info.external_attr >> 16) & 0o777
             if mode and os.name != 'nt':
                 target.chmod(mode)
+
+        # macOS app bundles need their symlinks (frameworks use them, and the
+        # signature covers them), so recreate them last
+        for name, link_target in links.items():
+            target = destination.joinpath(*PurePosixPath(name).parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(link_target, target)
+
+
+def _safe_link_target(name, raw):
+    """
+    The target of a symlink entry, if it is relative and stays inside the archive;
+    otherwise the update is refused.
+    """
+    try:
+        link_target = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise UpdateError('Downloaded update contains an unsafe file path.')
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name.rstrip('/')), link_target))
+    if (not link_target or link_target.startswith('/') or '\\' in link_target or ':' in link_target
+            or resolved == '..' or resolved.startswith('../')):
+        raise UpdateError('Downloaded update contains an unsafe file path.')
+    return link_target
 
 
 def _download_asset(asset, output_path, progress=None):
@@ -581,6 +638,9 @@ def _start_check(channel, manual=False):
     if manual:
         _checker.up_to_date.connect(lambda: _show_info('Yaz0moto is up to date.'))
         _checker.failed.connect(_show_error)
+    else:
+        # Don't interrupt startup with a dialog, but don't fail silently either
+        _checker.failed.connect(_show_status)
     _checker.finished.connect(_check_finished)
     _checker.start(channel)
 
@@ -705,3 +765,8 @@ def _show_info(text):
 
 def _show_error(text):
     QtWidgets.QMessageBox.warning(globals.mainWindow, 'Yaz0moto Update', text)
+
+
+def _show_status(text):
+    if globals.mainWindow is not None:
+        globals.mainWindow.statusBar().showMessage('Update check failed: ' + text, 15000)
