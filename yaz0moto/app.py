@@ -257,6 +257,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.scene.setItemIndexMethod(QtWidgets.QGraphicsScene.NoIndex)
         # While True, selecting doesn't open the properties panel (placing actors, drag-selecting, right-clicking)
         self.quietSelection = False
+        self.panelStaysShut = False  # a selection that doesn't open the properties panel
         # True while closing to restart (RestartEditor)
         self._restarting = False
         self.scene.selectionChanged.connect(self.ChangeSelectionHandler)
@@ -425,6 +426,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             self.restoreGeometry(setting('MainWindowGeometry'))
         if globals.settings.contains('MainWindowState'):
             self.restoreState(setting('MainWindowState'), 0)
+        # The properties panel used to float by default: move a saved floating one into the
+        # right sidebar once (after that, where it's put is remembered)
+        if not setting('PropEditorInSidebar', False):
+            setSetting('PropEditorInSidebar', True)
+            if self.propEditorDock.isFloating():
+                self.propEditorDock.setFloating(False)
         self.PlacePartsBar()
 
     def PlacePartsBar(self):
@@ -1074,6 +1081,21 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.areaComboBox.activated.connect(self.HandleSwitchArea)
         self.toolbar.addWidget(self.areaComboBox)
 
+        # The parts bar's show/hide button, at the right of the menu bar (the toolbar is often
+        # too full to keep a button at its end; macOS's own menu bar has no room for one)
+        act = self.partsBar.toggleViewAction()
+        act.setToolTip('Show or hide the parts bar')
+        if menubar.isNativeMenuBar():
+            self.toolbar.addAction(act)
+        else:
+            self.partsBarButton = QtWidgets.QToolButton()
+            self.partsBarButton.setObjectName('PartsBarToggle')
+            self.partsBarButton.setDefaultAction(act)
+            self.partsBarButton.setAutoRaise(True)
+            self.partsBarButton.setFocusPolicy(Qt.NoFocus)
+            self.partsBarButton.setIconSize(QtCore.QSize(18, 18))
+            menubar.setCornerWidget(self.partsBarButton, Qt.TopRightCorner)
+
     def SetupHelpMenu(self, menu=None):
         """
         Creates the help menu. This is separate because both the menubar uses this
@@ -1259,11 +1281,19 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.locationEditor = LocationEditorWidget()
         self.propEditorStack.addWidget(self.locationEditor)
 
+        # Shown while the panel is open and nothing with settings is selected
+        self.noPropsPage = QtWidgets.QLabel('Select an actor, entrance, location or path node to see its settings here.')
+        self.noPropsPage.setWordWrap(True)
+        self.noPropsPage.setAlignment(Qt.AlignCenter)
+        self.noPropsPage.setMargin(16)
+        self.noPropsPage.setStyleSheet('color: palette(mid);')
+        self.propEditorStack.addWidget(self.noPropsPage)
+
         dock = QtWidgets.QDockWidget('Selected Actor Properties', self)
         dock.setFocusPolicy(Qt.NoFocus)
         dock.setAttribute(Qt.WA_ShowWithoutActivating)
         dock.setVisible(False)
-        # Closable: selecting something shows it again
+        # Closable: Settings... in a thing's right-click menu shows it again
         dock.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable | QtWidgets.QDockWidget.DockWidgetFloatable
                          | QtWidgets.QDockWidget.DockWidgetClosable)
         dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
@@ -1279,8 +1309,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         dock.visibilityChanged.connect(lambda visible: visible or self.spriteDataEditor.stopMovementPreview())
         dock.installEventFilter(self)
 
+        # In the right sidebar (it can still be dragged out to float)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        dock.setFloating(True)
 
         # create the palette
         dock = QtWidgets.QDockWidget('Palette', self)
@@ -1720,7 +1750,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             self._restarting = False
             self.AutosaveTimer.start(60000)
             return False
-        subprocess.Popen(self._launchCommand())
+        self._restartedAs = subprocess.Popen(self._launchCommand())  # main() may wait for it
         QtWidgets.QApplication.quit()
         return True
 
@@ -3437,6 +3467,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         globals.PlaceObjectFullSize = dlg.editorTab.placeFullSize.isChecked()
         setSetting('PlaceObjectFullSize', globals.PlaceObjectFullSize)
 
+        globals.LegacyMouseControls = dlg.editorTab.legacyMouse.isChecked()
+        setSetting('LegacyMouseControls', globals.LegacyMouseControls)
+
         globals.SpriteListPreviewSize = dlg.editorTab.spriteListPreview.currentData()
         setSetting('SpriteListPreviewSize', globals.SpriteListPreviewSize)
 
@@ -4441,6 +4474,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
             event.accept()
 
+            # Closing the editor quits Yaz0moto, even if another window (a progress box, the
+            # level check...) is still open: Qt would otherwise keep running with no editor
+            QtCore.QTimer.singleShot(0, QtWidgets.QApplication.quit)
+
     def LoadDefaultTileset(self, name, silent=False, dirty=False):
         path = globals.miyamoto_path + "/yaz0extras/%s.szs" % name
         if not os.path.isfile(path):
@@ -5213,10 +5250,14 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.CurrentSelection = selitems
 
         n = len(self.selObjs) if self.selObjs else 0
+        hasPanel = showSpritePanel or showEntrancePanel or showLocationPanel or showPathPanel or showNabbitPathPanel
         if self.quietSelection:
-            # Selected by dragging over or right-clicking: the panel opens only on a direct
-            # click (or "Settings" in the right-click menu)
-            self.propEditorDock.setVisible(False)
+            # Midway through a selection box: the panel catches up when the drag ends
+            pass
+        elif not self.propEditorDock.isVisible() and (not hasPanel or self.panelStaysShut):
+            # Selecting a thing with settings opens the panel in the right sidebar; placing a
+            # thing or drawing a selection box doesn't (they update it while it's open)
+            pass
         elif showSpritePanel:
             title = 'Selected Actor Properties'
             self._switchPropEditor(self.spriteDataEditor, title)
@@ -5233,7 +5274,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             title = 'Selected Nabbit Path Node Properties'
             self._switchPropEditor(self.nabbitPathEditor, title)
         else:
-            self.propEditorDock.setVisible(False)
+            self._switchPropEditor(self.noPropsPage, 'Properties')
+
+        if not self.quietSelection:
+            self.ShowSelectionInPartsBar(selitems)
 
         self.actions['deselect'].setEnabled(len(self.CurrentSelection) > 0)
 
@@ -5246,6 +5290,31 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # newly-added field widgets inside setSprite().  Without the delay, sizeHint()
         # returns stale or wrong values (unpolished widgets report minimal sizes).
         QtCore.QTimer.singleShot(0, self._lockFloatingHeight)
+
+    def ShowPropertiesPanel(self):
+        """
+        Settings... in a thing's right-click menu: shows the selection's settings in the
+        properties panel (also after it was closed), which then follows the selection
+        """
+        self.propEditorDock.setVisible(True)
+        self.ChangeSelectionHandler()
+        self.propEditorDock.raise_()
+
+    def ShowSelectionInPartsBar(self, selitems):
+        """
+        Marks the selected actor or object on the parts bar, adding it there if it isn't
+        on it. While a part is picked, the bar keeps showing that part.
+        """
+        if partsbar.isArmed():
+            return
+        key = None
+        if len(selitems) == 1:
+            item = selitems[0]
+            if isinstance(item, SpriteItem):
+                key = ('spr', item.type)
+            elif isinstance(item, ObjectItem):
+                key = ('obj', item.tileset, item.type)
+        self.partsBar.showSelected(key)
 
     def HandleObjPosChange(self, obj, oldx, oldy, x, y):
         """
@@ -5693,8 +5762,11 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def AddPaletteSpriteToPartsBar(self, item, column=0):
         """
-        Puts the actor just picked in the list on the parts bar
+        Puts the actor just picked in the list on the parts bar (not when the click put the
+        picked actor down: the list handles that click first)
         """
+        if not partsbar.isArmed():
+            return
         data = item.data(0, Qt.UserRole)
         if isinstance(data, str) or (isinstance(data, int) and data >= 0):
             self.partsBar.addRecent(('spr', data))
@@ -7216,6 +7288,7 @@ def main():
     globals.CommentsFrozen = setting('FreezeComments', False)
     globals.OverwriteSprite = setting('OverwriteSprite', False)
     globals.PlaceObjectFullSize = setting('PlaceObjectFullSize', False)
+    globals.LegacyMouseControls = setting('LegacyMouseControls', False)
     globals.CategorizedSpriteData = setting('CategorizedSpriteData', False)
     globals.SpriteListPreviewSize = setting('SpriteListPreviewSize', globals.SPRITE_PREVIEW_DISABLED)
     globals.SpriteListPreviewHighDetail = setting('SpriteListPreviewHighDetail', False)
@@ -7251,8 +7324,24 @@ def main():
     check_for_updates()
 
     exitcodesys = globals.app.exec_()
-    globals.app.deleteLater()
-    sys.exit(exitcodesys)
+
+    # Restarted (to apply a theme etc.) from a terminal: the terminal waits for this process,
+    # so it waits (with no windows) for the new instance, which shares the terminal; the
+    # terminal's command then ends when the editor is closed rather than at the restart
+    child = getattr(globals.mainWindow, '_restartedAs', None)
+    if child is not None and any(s is not None and s.isatty() for s in (sys.stdin, sys.stdout)):
+        try:
+            exitcodesys = child.wait()
+        except KeyboardInterrupt:  # Ctrl+C reaches the new instance too
+            pass
+
+    # The editor is closed and the settings are already on disk (setSetting writes them).
+    # End the process here: a background render still running, or Qt tearing down its
+    # windows and OpenGL contexts, could otherwise keep Yaz0moto running unseen.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None:  # None in windowed builds
+            stream.flush()
+    os._exit(exitcodesys)
 
 
 if __name__ == '__main__': main()

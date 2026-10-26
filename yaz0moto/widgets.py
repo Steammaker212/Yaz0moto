@@ -38,6 +38,7 @@ from .items import CommentItem
 
 from .misc import clipStr, setting, setSetting, drawForegroundGrid
 from .misc import extract_field_value, extract_mask_value, insert_mask_value, mask_shift, mask_max_value
+from .misc import LargeSpinBox
 from .strybble import strybble_encode, strybble_decode, StrybbleEncodeError
 from .clips import Clip, load_clips, save_clips
 
@@ -2378,7 +2379,12 @@ class SpriteEditorWidget(QtWidgets.QWidget):
             """
             super().__init__()
 
-            self.widget = QtWidgets.QSpinBox()
+            # QSpinBox is limited to signed 32-bit ints, so fields wider
+            # than 31 bits need a spinbox that can hold larger values
+            if max - 1 > 0x7FFFFFFF:
+                self.widget = LargeSpinBox()
+            else:
+                self.widget = QtWidgets.QSpinBox()
             self.widget.setFocusPolicy(Qt.ClickFocus)
             self.widget.setRange(0, max - 1)
 
@@ -4957,6 +4963,11 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
 
+        # A left press held still on empty space scrolls the view instead of drawing a selection box
+        self.longPress = QtCore.QTimer(self)
+        self.longPress.setSingleShot(True)
+        self.longPress.timeout.connect(self.startLongPressPan)
+
     def dragEnterEvent(self, event):
         if partsbar.keyFromMime(event.mimeData()) is not None:
             event.acceptProposedAction()
@@ -4981,15 +4992,25 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
     # ---------------------------------------------------------------- mouse controls
     #
-    # Left click: with a part picked (in the palette, the actor icons or the parts bar), place
-    # it, dragging to size it; with nothing picked, select things and drag them around.
-    # With the entrance, path, location, comment or Nabbit path tools, left click places on
-    # empty space and selects one of those things when clicked on it.
-    # Left drag on empty space: select everything in the box, without opening the properties
-    # panel (that only opens when a thing is clicked directly).
-    # Right click: select a thing and show what it is, with its actions (for actors: Info,
-    # Settings and Delete).
+    # Left click on a thing selects it (or, if it was selected, deselects it, putting down the
+    # picked part if there is one), and dragging moves the selection around, whether or not
+    # a part is picked. Selecting a thing with
+    # settings shows them in the properties panel (the right sidebar).
+    # Left click on empty space with a part picked (in the palette, the actor icons or the
+    # parts bar) or the entrance, path, location, comment or Nabbit path tool: place it,
+    # dragging to size it. Alt + left click places on top of things too.
+    # On empty space with nothing picked: a click deselects everything, a drag draws a
+    # selection box, and a press held still (or a double click) deselects everything and
+    # scrolls the view while dragging.
+    # Right click: select a thing and show what it is, with its actions (Settings..., Info...
+    # for actors, Delete...).
     # Ctrl + right click: the zone menu. Middle drag: scroll.
+    #
+    # Legacy mouse controls (Preferences > Editor, globals.LegacyMouseControls) are the
+    # original ones instead: right click places the picked part or tool anywhere (dragging
+    # to size it), and with nothing picked deselects what's under the cursor (or everything);
+    # left click only selects and drags (on empty space: the same box and scrolling as
+    # above); Shift + right click shows a thing's menu; Ctrl + right click the zone menu.
     #
     # The classicMouse* handlers below are the original ones (right click painted); these
     # translate to them, so placing, sizing and undo work exactly as before.
@@ -4999,23 +5020,48 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
     placing = False
     crossCursor = False
+    LONG_PRESS_MS = 400
+    clickToggle = None  # (thing, was selected, press position, selection before) for a left click on a thing
+    panning = False
+    panFrom = None
+    pressPos = lastPos = None
+
+    def levelItemOf(self, item):
+        """The level thing an item belongs to (sprite images etc. count as their sprite), or None."""
+        while item is not None and not isinstance(item, self.LEVEL_ITEMS):
+            item = item.parentItem()
+        return item
 
     def levelItems(self, pos):
         """The level things under a point of the view, topmost first (sprite images etc. count as their sprite)."""
         out = []
         for item in self.items(pos):
-            while item is not None and not isinstance(item, self.LEVEL_ITEMS):
-                item = item.parentItem()
+            item = self.levelItemOf(item)
             if item is not None and item not in out:
                 out.append(item)
         return out
 
+    def grabbableAt(self, pos):
+        """Whether there's a thing at pos that a left click selects or drags (not just a zone's inside)."""
+        flags = QtWidgets.QGraphicsItem.ItemIsSelectable | QtWidgets.QGraphicsItem.ItemIsMovable
+        return any(item.isVisible() and int(item.flags()) & int(flags) for item in self.levelItems(pos))
+
+    @classmethod
+    def canPlace(cls):
+        """Whether a part (or a placing tool) is picked, so a click can place something."""
+        return partsbar.isArmed() or globals.CurrentPaintType in cls.TOOL_ITEMS
+
     def wouldPlace(self, pos):
-        """Whether a left click at pos places something (rather than selecting)."""
-        if partsbar.isArmed():
+        """
+        Whether a left click at pos places something (rather than selecting): with a part
+        picked or a placing tool, on space with nothing a click selects. With Alt held it
+        places on top of things too. Never with the legacy controls (right click places).
+        """
+        if globals.LegacyMouseControls or not self.canPlace():
+            return False
+        if QtWidgets.QApplication.keyboardModifiers() == Qt.AltModifier:
             return True
-        kind = self.TOOL_ITEMS.get(globals.CurrentPaintType)
-        return kind is not None and not any(isinstance(item, kind) for item in self.levelItems(pos))
+        return not self.grabbableAt(pos)
 
     @staticmethod
     def withButton(event, type_, button, buttons):
@@ -5026,32 +5072,138 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         button = event.button()
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
-        if (button == Qt.LeftButton and event.buttons() == Qt.LeftButton and modifiers == Qt.NoModifier
-                and self.wouldPlace(event.pos())):
+        mw = globals.mainWindow
+        legacy = globals.LegacyMouseControls
+        plainLeft = button == Qt.LeftButton and event.buttons() == Qt.LeftButton and modifiers == Qt.NoModifier
+        altLeft = button == Qt.LeftButton and event.buttons() == Qt.LeftButton and modifiers == Qt.AltModifier
+        onlyRight = button == Qt.RightButton and event.buttons() == Qt.RightButton
+
+        if (plainLeft or altLeft) and self.wouldPlace(event.pos()):
             self.placing = True
-            # A placed actor is selected quietly: its settings open when it's clicked, not now
-            mw = globals.mainWindow
-            mw.quietSelection = globals.CurrentPaintType == 4
+            # A placed thing is selected without opening the properties panel
+            mw.panelStaysShut = True
             try:
                 self.classicMousePressEvent(self.withButton(event, QtCore.QEvent.MouseButtonPress, Qt.RightButton, Qt.RightButton))
             finally:
-                mw.quietSelection = False
+                mw.panelStaysShut = False
             return
 
-        if button == Qt.RightButton and event.buttons() == Qt.RightButton and modifiers != Qt.ControlModifier:
+        if legacy and onlyRight and modifiers == Qt.ShiftModifier:
             event.accept()
             self.showItemMenu(event)
             return
 
-        self.classicMousePressEvent(event)
+        if legacy and onlyRight and modifiers != Qt.ControlModifier:
+            event.accept()
+            if self.canPlace():
+                # The original right-click placing (classicMouseMoveEvent sizes it as it's dragged)
+                mw.panelStaysShut = True
+                try:
+                    self.classicMousePressEvent(self.withButton(event, QtCore.QEvent.MouseButtonPress, Qt.RightButton, Qt.RightButton))
+                finally:
+                    mw.panelStaysShut = False
+            else:
+                self.deselectAt(event.pos())
+            return
 
-        # Nothing grabbed the press, so this is a rubber-band drag: what it passes over is
-        # selected quietly
-        if button == Qt.LeftButton and event.buttons() == Qt.LeftButton and self.scene().mouseGrabberItem() is None:
+        if not legacy and onlyRight and modifiers != Qt.ControlModifier:
+            event.accept()
+            self.showItemMenu(event)
+            return
+
+        before = set(self.scene().selectedItems()) if plainLeft else None
+        self.classicMousePressEvent(event)
+        if button != Qt.LeftButton or event.buttons() != Qt.LeftButton:
+            return
+
+        grabber = self.scene().mouseGrabberItem()
+        if grabber is None:
+            # Nothing grabbed the press, so this is a rubber-band drag: what it passes over is
+            # selected quietly. Held still instead, it scrolls the view (startLongPressPan).
             self.rubberBanding = True
             globals.mainWindow.quietSelection = True
+            if plainLeft:
+                self.pressPos = self.lastPos = event.pos()
+                self.longPress.start(self.LONG_PRESS_MS)
+        elif plainLeft and not legacy:  # the legacy controls deselect with right click instead
+            item = self.levelItemOf(grabber)
+            if item is not None and int(item.flags()) & int(QtWidgets.QGraphicsItem.ItemIsSelectable):
+                self.clickToggle = (item, item in before, event.pos(), before)
 
     rubberBanding = False
+
+    def mouseDoubleClickEvent(self, event):
+        if (event.button() == Qt.LeftButton and QtWidgets.QApplication.keyboardModifiers() == Qt.NoModifier
+                and not self.wouldPlace(event.pos()) and not self.grabbableAt(event.pos())):
+            # A double click on empty space deselects everything; dragging on from it scrolls
+            event.accept()
+            self.scene().clearSelection()
+            self.beginPan(event.pos())
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def startLongPressPan(self):
+        """A left press held still on empty space: the selection box goes and dragging scrolls the view."""
+        if not self.rubberBanding or not QtWidgets.QApplication.mouseButtons() & Qt.LeftButton:
+            return
+        # End the (still empty) selection box; the press already deselected everything
+        QtWidgets.QGraphicsView.mouseReleaseEvent(self, QtGui.QMouseEvent(
+            QtCore.QEvent.MouseButtonRelease, QtCore.QPointF(self.pressPos), Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+        self.rubberBanding = False
+        globals.mainWindow.quietSelection = False
+        self.beginPan(self.lastPos)
+
+    def beginPan(self, pos):
+        self.panning = True
+        self.panFrom = pos
+        self.viewport().setCursor(Qt.ClosedHandCursor)
+        self.crossCursor = False
+
+    def endPan(self):
+        self.panning = False
+        self.viewport().unsetCursor()
+
+    def dragChanged(self):
+        """Whether the things grabbed by the current left press were moved or resized."""
+        for item, old in self.drag_snapshot.items():
+            try:
+                if isinstance(item, (ObjectItem, ZoneItem, LocationItem)):
+                    new = (item.objx, item.objy, item.width, item.height)
+                else:
+                    new = (item.objx, item.objy)
+            except (RuntimeError, AttributeError):
+                continue
+            if new != old:
+                return True
+        return False
+
+    def deselectAt(self, pos):
+        """
+        The legacy controls' right click with nothing picked: deselects the thing under the
+        cursor if it's selected, otherwise everything.
+        """
+        selected = [item for item in self.levelItems(pos) if item.isSelected()]
+        if selected:
+            self.setSelection(set(self.scene().selectedItems()) - {selected[0]})
+        else:
+            self.scene().clearSelection()
+
+    def setSelection(self, items):
+        """Selects exactly these things, updating the panels once."""
+        mw = globals.mainWindow
+        mw.SelectionUpdateFlag = True
+        try:
+            for item in self.scene().selectedItems():
+                if item not in items:
+                    item.setSelected(False)
+            for item in items:
+                try:
+                    item.setSelected(True)
+                except RuntimeError:
+                    pass  # deleted in the meantime
+        finally:
+            mw.SelectionUpdateFlag = False
+        mw.ChangeSelectionHandler()
 
     def viewportEvent(self, event):
         # No tooltips about the things passed over while a button is held (dragging)
@@ -5060,36 +5212,86 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         return super().viewportEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self.panning:
+            offset = self.panFrom - event.pos()
+            self.panFrom = event.pos()
+            self.YScrollBar.setValue(self.YScrollBar.value() + offset.y())
+            self.XScrollBar.setValue(self.XScrollBar.value() + (-offset.x() if self.isRightToLeft() else offset.x()))
+            return
+
+        # Moving soon after the press makes it a selection box, not a scroll
+        if self.longPress.isActive():
+            self.lastPos = event.pos()
+            if (event.pos() - self.pressPos).manhattanLength() >= QtWidgets.QApplication.startDragDistance():
+                self.longPress.stop()
+
         if self.placing and event.buttons() & Qt.LeftButton:
             self.classicMouseMoveEvent(self.withButton(event, QtCore.QEvent.MouseMove, Qt.NoButton, Qt.RightButton))
             return
 
-        # A crosshair while a part is picked, so it's clear that clicking places it
+        # A crosshair where clicking places the picked part (not over things, which a click
+        # selects; with the legacy controls, right click places anywhere)
         if event.buttons() == Qt.NoButton:
-            armed = partsbar.isArmed()
-            if armed and not self.crossCursor:
+            places = partsbar.isArmed() and (globals.LegacyMouseControls or self.wouldPlace(event.pos()))
+            if places and not self.crossCursor:
                 self.viewport().setCursor(Qt.CrossCursor)
-            elif not armed and self.crossCursor:
+            elif not places and self.crossCursor:
                 self.viewport().unsetCursor()
-            self.crossCursor = armed
+            self.crossCursor = places
 
         self.classicMouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.longPress.stop()
+            if self.panning:
+                self.endPan()
+                return
+
         if self.placing and event.button() == Qt.LeftButton:
             self.placing = False
             self.classicMouseReleaseEvent(self.withButton(event, QtCore.QEvent.MouseButtonRelease, Qt.RightButton, Qt.NoButton))
             return
+
+        toggle = None
+        if event.button() == Qt.LeftButton:
+            toggle, self.clickToggle = self.clickToggle, None
+        changed = toggle is not None and self.dragChanged()  # before the release forgets the drag
+
         self.classicMouseReleaseEvent(event)
+
+        # A click (no drag) on a thing that was already selected deselects it, keeping the rest.
+        # With a part picked (e.g. the thing just placed), that puts the part down too, so
+        # it's deselected everywhere: the palette, the parts bar and the level
+        if toggle is not None:
+            item, wasSelected, pos, before = toggle
+            if (wasSelected and not changed
+                    and (event.pos() - pos).manhattanLength() < QtWidgets.QApplication.startDragDistance()):
+                self.setSelection(before - {item})
+                if partsbar.isArmed():
+                    partsbar.disarm()
+
         if self.rubberBanding and event.button() == Qt.LeftButton:
             self.rubberBanding = False
-            globals.mainWindow.quietSelection = False
+            mw = globals.mainWindow
+            mw.quietSelection = False
+            # The properties panel (if it's open) and the parts bar catch up with what the box selected
+            mw.panelStaysShut = True
+            try:
+                mw.ChangeSelectionHandler()
+            finally:
+                mw.panelStaysShut = False
 
     def placeAt(self, pos):
         """Places the picked part at a point of the view (used for drag and drop)."""
         point = QtCore.QPointF(pos)
-        self.classicMousePressEvent(QtGui.QMouseEvent(QtCore.QEvent.MouseButtonPress, point, Qt.RightButton,
-                                                      Qt.RightButton, Qt.NoModifier))
+        mw = globals.mainWindow
+        mw.panelStaysShut = True
+        try:
+            self.classicMousePressEvent(QtGui.QMouseEvent(QtCore.QEvent.MouseButtonPress, point, Qt.RightButton,
+                                                          Qt.RightButton, Qt.NoModifier))
+        finally:
+            mw.panelStaysShut = False
         self.classicMouseReleaseEvent(QtGui.QMouseEvent(QtCore.QEvent.MouseButtonRelease, point, Qt.RightButton,
                                                         Qt.NoButton, Qt.NoModifier))
 
@@ -5140,6 +5342,8 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
             ('Layer', str(sprite.layer)),
             ('Initial state', str(sprite.initialState)),
             ('Raw data', '<code>%s</code>' % raw),
+            # A patch icon for just this setting of the actor (see spriteicons)
+            ('Icon for this data', '<code>icons/%s-%s.png</code>' % (escape(str(sprite.type)), spriteicons.rawDataName(data))),
         ]
         if sdef is None:
             rows.append(('Definition', 'Unknown actor: it has no definition in this game or its patches'))
@@ -5153,12 +5357,13 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Information, 'Actor Info', text,
                                     QtWidgets.QMessageBox.Close, self)
         box.setTextFormat(Qt.RichText)
+        box.setTextInteractionFlags(Qt.TextSelectableByMouse)  # so the raw data and icon name can be copied
         box.exec_()
 
     def showItemMenu(self, event):
         """
-        Right click: select the thing under the cursor (its properties panel opens) and show
-        what it is, with its actions. On empty space, a picked part is put down.
+        Right click: select the thing under the cursor and show what it is, with its actions
+        (Settings... opens its properties panel). On empty space, a picked part is put down.
         """
         items = self.levelItems(event.pos())
         # A zone lies over everything in it, so it only counts when nothing else is there
@@ -5170,29 +5375,23 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
             return
 
         item = items[0]
-        isActor = isinstance(item, SpriteItem)
         if not item.isSelected():
-            # An actor's panel opens when it's clicked, not from the right click
-            mw.quietSelection = isActor
-            try:
-                self.scene().clearSelection()
-                item.setSelected(True)
-            finally:
-                mw.quietSelection = False
+            self.setSelection({item})
 
         menu = QtWidgets.QMenu(self)
         title = menu.addAction(self.describe(item))
         title.setEnabled(False)
         menu.addSeparator()
-        if isActor:
-            menu.addAction(GetIcon('info'), 'Info...', lambda: self.showActorInfo(item))
-            menu.addSeparator()
-            delete = menu.addAction(GetIcon('delete'), 'Delete')
-            delete.triggered.connect(lambda: QtWidgets.QApplication.sendEvent(
-                mw, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier)))
-        elif isinstance(item, ZoneItem):
+        if isinstance(item, ZoneItem):
             menu.addAction(mw.actions['zones'])
         else:
+            # Settings open in the properties panel (the right sidebar), for things that have them
+            if isinstance(item, (SpriteItem, EntranceItem, LocationItem, PathItem, NabbitPathItem)):
+                settings = menu.addAction(GetIcon('settings'), 'Settings...', mw.ShowPropertiesPanel)
+                menu.setDefaultAction(settings)
+            if isinstance(item, SpriteItem):
+                menu.addAction(GetIcon('info'), 'Info...', lambda: self.showActorInfo(item))
+            menu.addSeparator()
             for name in ('copy', 'cut', 'duplicate', 'raise', 'lower'):
                 action = mw.actions.get(name)
                 if action is not None and action.isEnabled():

@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Underwater"
+		version="1.0"
+		creator="Yaz0moto"
+		description="The original Underwater theme, for underwater levels."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#1FA595" />
+		<var name="background" value="#DCFFE6" />
+		<var name="text"       value="#000000" />
+		<var name="level"      value="#369A90" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

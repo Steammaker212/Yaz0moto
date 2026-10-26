@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Cavern"
+		version="1.0"
+		creator="Yaz0moto"
+		description="The original Cavern theme, for underground levels."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#8C7BFF" />
+		<var name="background" value="#323241" />
+		<var name="text"       value="#F0F0F0" />
+		<var name="level"      value="#14143C" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

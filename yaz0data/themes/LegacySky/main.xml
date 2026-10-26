@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Sky"
+		version="1.0"
+		creator="Yaz0moto"
+		description="The original Sky theme, for sky levels."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#3F7BFF" />
+		<var name="background" value="#EFEFEF" />
+		<var name="text"       value="#000000" />
+		<var name="level"      value="#789BFF" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

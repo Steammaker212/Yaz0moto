@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Dark"
+		version="1.0"
+		creator="JasonP27"
+		description="The original Dark theme."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#9A3AFF" />
+		<var name="background" value="#646464" />
+		<var name="text"       value="#FFFFFF" />
+		<var name="level"      value="#333333" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

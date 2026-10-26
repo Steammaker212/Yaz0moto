@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy RVLution Red"
+		version="1.0"
+		creator="Yaz0moto"
+		description="The original RVLution Red theme, after RVLution.net."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#C0392B" />
+		<var name="background" value="#EEE5E5" />
+		<var name="text"       value="#000000" />
+		<var name="level"      value="#606060" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

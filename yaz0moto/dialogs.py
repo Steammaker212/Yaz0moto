@@ -2032,6 +2032,16 @@ class PreferencesDialog(QtWidgets.QDialog):
                     'at its full width and height instead of as a 1×1 tile.')
                 self.placeFullSize.setChecked(globals.PlaceObjectFullSize)
 
+                self.legacyMouse = QtWidgets.QCheckBox('Legacy mouse controls in the level view (right click places)')
+                self.legacyMouse.setToolTip(
+                    '<b>Legacy mouse controls</b> (only in the level view; everywhere else left click is used as usual)<br>'
+                    'Right click: place the picked part or tool, even over things, dragging to size it<br>'
+                    'Right click with nothing picked: deselect what is under the cursor (on empty space, everything)<br>'
+                    'Left click: select and drag things; on empty space drag a selection box<br>'
+                    'Shift + right click: a thing\'s menu (Settings, Info, Delete...)<br>'
+                    'Ctrl + right click: the zone menu. Esc, or clicking the part again, puts it down')
+                self.legacyMouse.setChecked(globals.LegacyMouseControls)
+
                 self.spriteListPreview = QtWidgets.QComboBox()
                 self.spriteListPreview.addItem('Disabled',       globals.SPRITE_PREVIEW_DISABLED)
                 self.spriteListPreview.addItem('Small (24 px)',  globals.SPRITE_PREVIEW_SMALL)
@@ -2065,6 +2075,7 @@ class PreferencesDialog(QtWidgets.QDialog):
                 ed_lay.addWidget(self.categorizedSpriteData)
                 ed_lay.addWidget(self.overwriteActors)
                 ed_lay.addWidget(self.placeFullSize)
+                ed_lay.addWidget(self.legacyMouse)
                 ed_lay.addLayout(preview_row)
                 editor_group = QtWidgets.QGroupBox('Editor')
                 editor_group.setLayout(ed_lay)
@@ -3529,6 +3540,11 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self.NonWinStyle.clear()
                 self.NonWinStyle.addItems(keys)
                 self.NonWinStyle.setCurrentIndex(keys.index(style))
+
+                # Picking a theme drawn for a toolbar icon size (Legacy's 16 px icons) picks that size too
+                if (themeObj.toolbarIconSize in TOOLBAR_ICON_SIZES
+                        and theme != getattr(self, '_initial_theme', theme)):
+                    self.toolbarIconSize.setCurrentIndex(TOOLBAR_ICON_SIZES.index(themeObj.toolbarIconSize))
 
                 for name, themeObj in self.themes:
                     if name == self.themeBox.currentText():

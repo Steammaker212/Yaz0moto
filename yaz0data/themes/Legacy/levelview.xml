@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<!--
+    A template for the classic themes: ${name} values come from the theme's accent,
+    background, text and level colours (see yaz0moto/themevars.py). Entrances, paths,
+    locations and comments keep the bright colours of the original Neon theme; selections,
+    zones, actor boxes and the overview use the accent. A theme built on this one can
+    still list its own colours in its own levelview.xml.
+-->
+<colors>
+    <!-- Level view -->
+    <color id="bg"                       value="${level}"        />
+    <color id="grid"                     value="#FFFFFF2D"       />
+    <color id="zone_lines"               value="${accent}"       />
+    <color id="zone_corner"              value="${accent_light}" />
+    <color id="zone_text"                value="${level_text}"   />
+    <color id="zone_dark_fill"           value="#00000030"       />
+    <color id="zone_entrance_helper"     value="#BE000078"       />
+    <color id="object_fill_s"            value="${accent}40"     />
+    <color id="object_lines_s"           value="${accent_light}" />
+    <color id="sprite_fill_s"            value="${accent}40"     />
+    <color id="sprite_lines_s"           value="${accent_light}" />
+    <color id="spritebox_fill"           value="${accent}30"     />
+    <color id="spritebox_fill_s"         value="${accent}80"     />
+    <color id="spritebox_lines"          value="${accent_light}" />
+    <color id="spritebox_lines_s"        value="#FFFFFF"         />
+    <color id="entrance_fill"            value="#FF00000F"       />
+    <color id="entrance_fill_s"          value="#FF000040"       />
+    <color id="entrance_lines"           value="#FF976DFF"       />
+    <color id="entrance_lines_s"         value="#FFFFFF"         />
+    <color id="location_fill"            value="#6400D70F"       />
+    <color id="location_fill_s"          value="#6400D765"       />
+    <color id="location_lines"           value="#B18FFFFF"       />
+    <color id="location_lines_s"         value="#FFFFFF"         />
+    <color id="location_text"            value="#FFFFFF"         />
+    <color id="path_connector"           value="#17FF00FF"       />
+    <color id="path_fill"                value="#17FF000F"       />
+    <color id="path_fill_s"              value="#17FF0040"       />
+    <color id="path_lines"               value="#3FFF5FFF"       />
+    <color id="path_lines_s"             value="#FFFFFF"         />
+    <color id="nabbit_path_connector"    value="#A14BFFFF"       />
+    <color id="nabbit_path_fill"         value="#A14BFF0F"       />
+    <color id="nabbit_path_fill_s"       value="#A14BFF40"       />
+    <color id="nabbit_path_lines"        value="#C94BAFFF"       />
+    <color id="nabbit_path_lines_s"      value="#FFFFFF"         />
+    <color id="comment_fill"             value="#7F7F003F"       />
+    <color id="comment_fill_s"           value="#7F7F007F"       />
+    <color id="comment_lines"            value="#FFFF00DF"       />
+    <color id="comment_lines_s"          value="#FFFF00FF"       />
+    <color id="smi"                      value="#FFFFFF28"       />
+
+    <!-- Level overview -->
+    <color id="overview_entrance"        value="#FF0000"         />
+    <color id="overview_location_fill"   value="#6400D732"       />
+    <color id="overview_location_lines"  value="#B18FFF"         />
+    <color id="overview_object"          value="${level_text}"   />
+    <color id="overview_sprite"          value="${accent}"       />
+    <color id="overview_viewbox"         value="${accent_light}" />
+    <color id="overview_zone_fill"       value="${accent}20"     />
+    <color id="overview_zone_lines"      value="${accent}"       />
+
+    <!--
+        Window colours. The plain controls' bevels come from the background (ui), as in
+        the original themes; these only set the text, fields and highlight colours.
+    -->
+    <color id="ui"                       value="${window}"       />
+    <color id="palette_window"           value="${window}"       />
+    <color id="palette_windowtext"       value="${text}"         />
+    <color id="palette_base"             value="${field}"        />
+    <color id="palette_alternatebase"    value="${field_alt}"    />
+    <color id="palette_text"             value="${text}"         />
+    <color id="palette_button"           value="${window}"       />
+    <color id="palette_buttontext"       value="${text}"         />
+    <color id="palette_highlight"        value="${accent}"       />
+    <color id="palette_highlightedtext"  value="${on_accent}"    />
+    <color id="palette_tooltipbase"      value="${raised}"       />
+    <color id="palette_tooltiptext"      value="${text}"         />
+    <color id="palette_link"             value="${accent}"       />
+    <color id="palette_linkvisited"      value="${accent_dark}"  />
+    <color id="palette_placeholdertext"  value="${disabled}"     />
+    <color id="palettedisabled_windowtext" value="${disabled}"   />
+    <color id="palettedisabled_text"       value="${disabled}"   />
+    <color id="palettedisabled_buttontext" value="${disabled}"   />
+</colors>

@@ -221,7 +221,7 @@ check('switching to a theme without a style sheet clears the old one', app.style
 # ---------------------------------------------------------------- themes built on the Yaz0moto theme
 
 from yaz0moto import themevars
-from yaz0moto.ui import MiyamotoTheme, availableThemes
+from yaz0moto.ui import MiyamotoTheme, availableThemes, _LazySvgIcon
 
 dark = themevars.derive({'accent': '#F7941D', 'background': '#1C1C1F', 'text': '#ECECEF'})
 light = themevars.derive({'accent': '#3F7BFF', 'background': '#EAF1FF', 'text': '#1E2A44'})
@@ -233,8 +233,12 @@ check('control corners stop at fully round', themevars.derive({'roundness': '20'
 check('icons are recoloured for a theme', '#3F7BFF' in themevars.recolor_svg('<path fill="#F7941D"/>', light))
 
 bad = []
+classic = []
 for name in availableThemes():
     t = MiyamotoTheme(name)
+    if t.isClassic:
+        classic.append(name)
+        continue  # checked below
     if name != 'Yaz0moto' and not t.variables:
         bad.append('%s: not built on Yaz0moto' % name)
     if '${' in re.sub(r'/\*.*?\*/', '', t.styleSheet, flags=re.S):
@@ -243,14 +247,59 @@ for name in availableThemes():
         bad.append('%s: highlight is not the accent' % name)
     if not t.iconCacheSm.get('realview'):
         bad.append('%s: no icons' % name)
-check('every bundled theme is built on the Yaz0moto theme and fills in completely', not bad, bad)
+check('every bundled modern theme is built on the Yaz0moto theme and fills in completely', not bad, bad)
+
+# ---------------------------------------------------------------- classic themes, built on the Legacy theme
+
+pngs = set()
+for folder in (os.path.join(ROOT, 'yaz0data', 'ico', 'sm'), os.path.join(ROOT, 'yaz0data', 'themes', 'Legacy', 'icosm')):
+    pngs.update(f[5:-4] for f in os.listdir(folder) if f.startswith('icon-') and f.endswith('.png'))
+check('every icon the editor uses has an original-style icon for the classic themes', used <= pngs, sorted(used - pngs))
+
+
+def classicProblems(name):
+    t = MiyamotoTheme(name)
+    out = []
+    if t.styleSheet:
+        out.append('%s: has a style sheet' % name)
+    if not t.variables:
+        out.append('%s: not built on Legacy' % name)
+    elif t.color('palette_highlight').name().upper() != t.variables['accent']:
+        out.append('%s: highlight is not the accent' % name)
+    if t.toolbarIconSize != 16:
+        out.append('%s: toolbar icons are not 16 px' % name)
+    # Legacy's own PNGs, and no modern (SVG) icons: the rest come from the original set
+    if 'parts' not in t.iconCacheSm or any(isinstance(i, _LazySvgIcon) for i in t.iconCacheSm.values()):
+        out.append('%s: not the original-style icons' % name)
+    if any(c is None for c in (t.color('ui'), t.color('bg'), t.color('zone_lines'))):
+        out.append('%s: missing colours' % name)
+    return out
+
+
+bad = [p for name in classic for p in classicProblems(name)]
+check('there are bundled classic themes besides Legacy', 'Legacy' in classic and len(classic) >= 5, classic)
+check('every classic theme has the original look in its own colours (no style sheet, accent highlight, 16 px icons)',
+      not bad, bad)
+legacy = MiyamotoTheme('Legacy')
+check('the Legacy theme keeps the original Neon level colours',
+      legacy.color('bg').name().upper() == '#080808' and legacy.color('ui').name().upper() == '#181818'
+      and legacy.color('zone_lines').name().upper() == '#6EC0FF')
 
 folder = os.path.join(globals.user_data_path, 'themes', 'Mine')
 themevars.write_theme(folder, 'Mine', {'accent': '#B04CFF', 'background': '#101418', 'text': '#EEEEEE', 'roundness': '6'})
 mine = MiyamotoTheme('Mine')
 check('a theme made in the theme editor loads back',
       mine.themeName == 'Mine' and mine.variables['accent'] == '#B04CFF' and mine.variables['radius'] == '6'
-      and 'Mine' in availableThemes())
+      and 'Mine' in availableThemes() and not mine.isClassic)
+
+folder = os.path.join(globals.user_data_path, 'themes', 'MineClassic')
+themevars.write_theme(folder, 'Mine Classic', {'accent': '#22AA44', 'background': '#D8E0E8', 'text': '#101010',
+                                               'level': '#405060', 'roundness': '6'}, base=themevars.CLASSIC_BASE)
+mineClassic = MiyamotoTheme('MineClassic')
+check('a classic theme made in the theme editor loads back, in its own colours',
+      mineClassic.isClassic and not classicProblems('MineClassic') and mineClassic.color('bg').name().upper() == '#405060'
+      and mineClassic.color('zone_lines').name().upper() == '#22AA44'
+      and 'roundness' not in open(os.path.join(folder, 'main.xml'), encoding='utf-8').read())
 
 # ---------------------------------------------------------------- actor icons
 
@@ -275,6 +324,31 @@ check('patches/<patch>/icons/<id>.png is used when an actor has no sprite image'
 icon8 = spriteicons.spriteIcon(8, 48)
 check('otherwise the Bowser face is drawn', not icon8.isNull() and QtGui.QColor(icon8.toImage().pixel(24, 20)).alpha() > 0)
 
+data7 = bytes.fromhex('0000 0010 0000 0000 0000 0001')
+blue = QtGui.QPixmap(20, 20)
+blue.fill(QtGui.QColor('#0000FF'))
+blue.save(os.path.join(patch, 'icons', '7-%s.png' % spriteicons.rawDataName(data7)))
+green = QtGui.QPixmap(20, 20)
+green.fill(QtGui.QColor('#00FF00'))
+green.save(os.path.join(patch, 'icons', '9_00000000000000000000ABCD.png'))
+spriteicons.clearCache()
+
+def levelColor(type_id, data):
+    pix = spriteicons.levelIcon(type_id, 40, data)
+    return QtGui.QColor(pix.toImage().pixel(20, 20)).name() if pix is not None else None
+
+check('raw data is written in icon names as Info... shows it',
+      spriteicons.rawDataName(data7) == '0000-0010-0000-0000-0000-0001')
+check('an icon named <id>-<raw data>.png is used for an actor with that data',
+      levelColor(7, data7) == '#0000ff')
+check('the <id>.png icon is used for other data', levelColor(7, bytes(12)) == '#ff0000')
+check('the raw data can also follow an underscore, without dashes, in any case',
+      levelColor(9, bytes.fromhex('00000000000000000000abcd')) == '#00ff00' and levelColor(9, bytes(12)) is None)
+check('only an icon for the exact data replaces a sprite image (not <id>.png)',
+      spriteicons.levelIcon(7, 40, data7, exactOnly=True) is not None
+      and spriteicons.levelIcon(7, 40, bytes(12), exactOnly=True) is None)
+check('the palette keeps the <id>.png icon',QtGui.QColor(spriteicons.spriteIcon(7, 48).toImage().pixel(24, 24)).name() == '#ff0000')
+
 # ---------------------------------------------------------------- parts bar
 
 from yaz0moto import partsbar
@@ -292,6 +366,16 @@ check('the parts bar keeps the latest parts first, without repeats, up to its si
 check('the parts bar is remembered', [partsbar.decode(k) for k in setting('PartsBar')] == bar.keys)
 check('parts of tilesets that are not loaded are left off the bar',
       partsbar.partIcon(('obj', 3, 0), 40) is None and partsbar.partIcon(('obj', 0, 1), 40) is not None)
+
+order = list(bar.keys)
+bar.showSelected(('spr', 3))
+check('a part selected in the level that is on the bar is marked, without moving it',
+      bar.keys == order and bar.current == ('spr', 3) and [b.key for b in bar.buttons if b.isChecked()] == [('spr', 3)])
+bar.showSelected(('obj', 0, 3))
+check('a part selected in the level that is not on the bar is added to it, marked',
+      bar.keys[0] == ('obj', 0, 3) and bar.current == ('obj', 0, 3))
+bar.showSelected(None)
+check('deselecting unmarks the bar', bar.current is None and not any(b.isChecked() for b in bar.buttons))
 
 # ---------------------------------------------------------------- welcome star
 

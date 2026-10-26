@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!--
+    The look from before the Yaz0moto theme, and the base of the other classic themes:
+    they set base="Legacy" and their own <variables> (accent, background, text, level).
+    Plain Fusion controls (no style sheet) and the original icons (yaz0data/ico); icosm and
+    icolg only hold the icons the original set never had, drawn in its style by
+    tools/legacy_theme_icons.py. The level view and window colours in levelview.xml are
+    templates filled in from the variables. These ones are the original Neon theme's.
+-->
+<theme
+		format="1.0"
+		name="Legacy"
+		version="1.0"
+		creator="RoadrunnerWMC, Yaz0moto"
+		description="The original look: dark Neon colours, plain controls and the original icons."
+		style="Fusion"
+		toolbarIconSize="16"
+		>
+
+	<variables>
+		<var name="accent"     value="#6EC0FF" />
+		<var name="background" value="#181818" />
+		<var name="text"       value="#F0F0F0" />
+		<var name="level"      value="#080808" />
+	</variables>
+
+	<colors file="levelview.xml" />
+	<icons size="sm" folder="icosm" />
+	<icons size="lg" folder="icolg" />
+
+</theme>

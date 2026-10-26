@@ -8,8 +8,9 @@
 
 """
 The theme editor: make a theme of your own by choosing an accent colour, a background,
-a text colour, a level background and how round things are. The theme is built on the
-Yaz0moto theme (same shapes and icons, in your colours) and saved in the user data folder.
+a text colour, a level background and how round things are. A modern theme is built on
+the Yaz0moto theme (same shapes and icons, in your colours); a classic one on the Legacy
+theme (the original controls and icons, in your colours). It's saved in the user data folder.
 """
 
 import os
@@ -67,6 +68,30 @@ class ColorButton(QtWidgets.QPushButton):
             menu = QtWidgets.QMenu(self)
             menu.addAction(self.emptyText, lambda: self.setColor(''))
             menu.exec_(event.globalPos())
+
+
+# The classic themes have no style sheet: their plain controls take the window colours. The
+# app's style sheet (a modern theme's) would still reach the preview, so the preview draws
+# classic-looking controls with this one instead.
+CLASSIC_PREVIEW = """
+QFrame#ThemePreview { background: ${window}; border: 1px solid ${edge_dark}; border-radius: 0; }
+QFrame#ThemePreview QWidget { background: ${window}; color: ${text}; border-radius: 0; }
+QFrame#ThemePreview QToolBar { border: none; border-bottom: 1px solid ${edge_dark}; spacing: 1px; padding: 1px; }
+QFrame#ThemePreview QToolButton { background: transparent; border: 1px solid transparent; padding: 2px; }
+QFrame#ThemePreview QToolButton:checked { background: ${pressed}; border: 1px solid ${edge_dark}; }
+QFrame#ThemePreview QLineEdit, QFrame#ThemePreview QListWidget, QFrame#ThemePreview QSpinBox,
+QFrame#ThemePreview QComboBox { background: ${field}; border: 1px solid ${edge_dark}; padding: 2px;
+    selection-background-color: ${accent}; selection-color: ${on_accent}; }
+QFrame#ThemePreview QListWidget::item:selected { background: ${accent}; color: ${on_accent}; }
+QFrame#ThemePreview QPushButton { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 ${edge_light}, stop: 1 ${window});
+    border: 1px solid ${edge_dark}; padding: 3px 14px; }
+QFrame#ThemePreview QPushButton:default { border: 1px solid ${accent}; }
+QFrame#ThemePreview QTabWidget::pane { border: 1px solid ${edge_dark}; }
+QFrame#ThemePreview QTabBar::tab { background: ${panel}; border: 1px solid ${edge_dark}; padding: 3px 10px; margin-right: -1px; }
+QFrame#ThemePreview QTabBar::tab:selected { background: ${window}; border-bottom-color: ${window}; }
+QFrame#ThemePreview QCheckBox::indicator { width: 11px; height: 11px; border: 1px solid ${edge_dark}; background: ${field}; image: none; }
+QFrame#ThemePreview QCheckBox::indicator:checked { background: ${accent}; }
+"""
 
 
 class ThemePreview(QtWidgets.QFrame):
@@ -130,28 +155,37 @@ class ThemePreview(QtWidgets.QFrame):
         layout.addWidget(self.toolbar)
         layout.addLayout(body)
 
-    def apply(self, variables, template, iconFolder):
-        qss = themevars.substitute(template, variables)
-        images = themeImages(variables) or os.path.join(os.path.dirname(iconFolder), 'images')
-        qss = qss.replace('{images}', images.replace('\\', '/'))
-        # QMainWindow/QDialog rules don't reach a frame, so give the frame the window colour
-        qss += '\nQFrame#ThemePreview { background: %s; border-radius: %spx; }' % (variables['window'], variables['radius_l'])
+    def apply(self, variables, template, iconFolder, classic=False):
+        """Draws the preview in a theme's colours: modern (the style sheet template and SVG icons) or classic."""
+        if classic:
+            qss = themevars.substitute(CLASSIC_PREVIEW, variables)
+        else:
+            qss = themevars.substitute(template, variables)
+            images = themeImages(variables) or os.path.join(os.path.dirname(iconFolder), 'images')
+            qss = qss.replace('{images}', images.replace('\\', '/'))
+            # QMainWindow/QDialog rules don't reach a frame, so give the frame the window colour
+            qss += '\nQFrame#ThemePreview { background: %s; border-radius: %spx; }' % (variables['window'], variables['radius_l'])
         self.setStyleSheet(qss)
         # Qt keeps the old look on children that were already styled; restyle them
         for widget in [self] + self.findChildren(QtWidgets.QWidget):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
             widget.update()
+        self.toolbar.setIconSize(QtCore.QSize(16, 16) if classic else QtCore.QSize(22, 22))
         for name, act in self.actions:
-            icon = svgIcon(os.path.join(iconFolder, 'icon-%s.svg' % name), False, variables)
+            if classic:
+                icon = QtGui.QIcon(os.path.join(globals.miyamoto_path, 'yaz0data', 'ico', 'sm', 'icon-%s.png' % name))
+            else:
+                icon = svgIcon(os.path.join(iconFolder, 'icon-%s.svg' % name), False, variables)
             if icon is not None:
                 act.setIcon(icon)
-        self.level.setStyleSheet('QLabel { background: %s; border: 2px solid %s; border-radius: %spx; }'
-                                 % (variables['level'], variables['accent'], variables['radius']))
+        self.level.setStyleSheet('QLabel { background: %s; border: %dpx solid %s; border-radius: %spx; }'
+                                 % (variables['level'], 1 if classic else 2, variables['accent'],
+                                    0 if classic else variables['radius']))
 
 
 class ThemeEditorDialog(QtWidgets.QDialog):
-    """Create (or change) a theme of your own, built on the Yaz0moto theme."""
+    """Create (or change) a theme of your own, built on the Yaz0moto theme or (classic) the Legacy theme."""
 
     def __init__(self, startTheme=None, parent=None):
         super().__init__(parent)
@@ -169,6 +203,13 @@ class ThemeEditorDialog(QtWidgets.QDialog):
         if startTheme and self.startBox.findText(startTheme) >= 0:
             self.startBox.setCurrentText(startTheme)
         self.startBox.currentTextChanged.connect(self.loadStart)
+
+        self.styleBox = QtWidgets.QComboBox()
+        self.styleBox.addItem('Modern (rounded controls, Yaz0moto icons)', themevars.BASE_THEME)
+        self.styleBox.addItem('Classic (plain controls, original icons)', themevars.CLASSIC_BASE)
+        self.styleBox.setToolTip('Modern themes are built on the Yaz0moto theme, classic ones on the Legacy theme. '
+                                 'Both are drawn in the colours you choose here.')
+        self.styleBox.currentIndexChanged.connect(self.updatePreview)
 
         self.nameEdit = QtWidgets.QLineEdit('My Theme')
         self.accent = ColorButton(themevars.DEFAULTS['accent'])
@@ -189,12 +230,14 @@ class ThemeEditorDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout()
         form.addRow('Start from:', self.startBox)
+        form.addRow('Style:', self.styleBox)
         form.addRow('Name:', self.nameEdit)
         form.addRow('Accent:', self.accent)
         form.addRow('Background:', self.background)
         form.addRow('Text:', self.text)
         form.addRow('Level background:', self.level)
-        form.addRow('Roundness:', roundRow)
+        self.roundnessRow = QtWidgets.QLabel('Roundness:')
+        form.addRow(self.roundnessRow, roundRow)
 
         note = QtWidgets.QLabel('Every other shade is worked out from these colours, for light and dark themes. '
                                 'The theme is saved in your user data folder; restart Yaz0moto after choosing it.')
@@ -223,6 +266,10 @@ class ThemeEditorDialog(QtWidgets.QDialog):
 
         self.loadStart(self.startBox.currentText())
 
+    def base(self):
+        """The theme the one being made is built on: Yaz0moto (modern) or Legacy (classic)."""
+        return self.styleBox.currentData()
+
     def inputs(self):
         return {
             'accent': self.accent.color or themevars.DEFAULTS['accent'],
@@ -250,13 +297,23 @@ class ThemeEditorDialog(QtWidgets.QDialog):
         except (TypeError, ValueError):
             self.roundness.setValue(10)
         self.roundness.blockSignals(False)
-        if name != themevars.BASE_THEME and os.path.dirname(theme.folder or '') == userThemesFolder():
+        # Starting from a classic theme makes a classic one
+        self.styleBox.blockSignals(True)
+        self.styleBox.setCurrentIndex(self.styleBox.findData(themevars.CLASSIC_BASE if theme.isClassic
+                                                             else themevars.BASE_THEME))
+        self.styleBox.blockSignals(False)
+        if (name not in (themevars.BASE_THEME, themevars.CLASSIC_BASE)
+                and os.path.dirname(theme.folder or '') == userThemesFolder()):
             self.nameEdit.setText(theme.themeName)  # editing one of your own themes
         self.updatePreview()
 
     def updatePreview(self):
+        classic = self.base() == themevars.CLASSIC_BASE
         self.roundnessLabel.setText('%d px' % self.roundness.value())
-        self.preview.apply(themevars.derive(self.inputs()), self.template, self.iconFolder)
+        # Classic controls aren't rounded
+        for widget in (self.roundnessRow, self.roundness, self.roundnessLabel):
+            widget.setEnabled(not classic)
+        self.preview.apply(themevars.derive(self.inputs()), self.template, self.iconFolder, classic)
 
     def save(self):
         name = self.nameEdit.text().strip()
@@ -264,7 +321,7 @@ class ThemeEditorDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, 'Theme Editor', 'Give the theme a name.')
             return
         folder = os.path.join(userThemesFolder(), folderName(name))
-        if folderName(name) in (themevars.BASE_THEME, 'Classic'):
+        if folderName(name) in (themevars.BASE_THEME, themevars.CLASSIC_BASE, 'Classic'):
             QtWidgets.QMessageBox.warning(self, 'Theme Editor', 'That name is taken by a built-in theme.')
             return
         if os.path.isfile(os.path.join(folder, 'main.xml')):
@@ -272,7 +329,7 @@ class ThemeEditorDialog(QtWidgets.QDialog):
             if reply != QtWidgets.QMessageBox.Yes:
                 return
         try:
-            themevars.write_theme(folder, name, self.inputs())
+            themevars.write_theme(folder, name, self.inputs(), base=self.base())
         except OSError as e:
             QtWidgets.QMessageBox.warning(self, 'Theme Editor', 'Could not save the theme:\n%s' % e)
             return

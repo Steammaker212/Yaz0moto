@@ -13,10 +13,17 @@ Icons for actors (sprites), for the Add Actors palette and the parts bar. For ea
      patches/<patch name>/icons/<actor id>.png (e.g. icons/45.png);
   3. otherwise yaz0data/sprites/no-image-sprite.png (Bowser) with the actor's name under it.
 
+In the level, an actor can also have an icon for one setting of it: <actor id>-<raw
+data>.png (or <actor id>_<raw data>.png), the raw data as Info... shows it, e.g.
+icons/59_0000-0000-0000-1000-0005-0000.png. When both the ID and the raw data match, it's
+drawn instead of the actor's sprite image (or instead of <actor id>.png, for an actor with
+no sprite image). <actor id>.png alone only replaces the ID box of actors with no image.
+
 Rendering loads images, so call these outside paint events (the grids queue them).
 """
 
 import os
+import re
 
 from PyQt5 import QtCore, QtGui
 Qt = QtCore.Qt
@@ -106,13 +113,69 @@ def _isBlank(image):
     return True
 
 
-def _pngIcon(type_id, size):
-    for folder in iconFolders():
-        path = os.path.join(folder, '%s.png' % type_id)
-        if os.path.isfile(path):
-            pix = QtGui.QPixmap(path)
-            if not pix.isNull():
-                return pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+# "<id>-<raw data>": the raw data as groups of 4 hex digits, joined by - or _ (or not at all)
+_RAW_NAME = re.compile(r'(?P<id>.+?)[-_](?P<raw>[0-9A-Fa-f]{4}(?:[-_]?[0-9A-Fa-f]{4})+)')
+_index = None  # (folders, [(folder's {id: path}, folder's {(id, raw data): path})]), most specific patch first
+
+
+def rawDataName(data):
+    """Sprite data as it's written in an icon's file name: 0000-0000-0000-0000-0000-0000."""
+    data = bytes(data)
+    return '-'.join(data[i:i + 2].hex().upper() for i in range(0, len(data), 2))
+
+
+def _iconIndex():
+    """The PNGs in the icon folders (read again when the active patch changes)."""
+    global _index
+    folders = iconFolders()
+    if _index is None or _index[0] != folders:
+        _index = (folders, [])
+        for folder in folders:
+            try:
+                names = os.listdir(folder)
+            except OSError:
+                continue
+            plain, exact = {}, {}
+            for name in names:
+                stem, ext = os.path.splitext(name)
+                if ext.lower() != '.png':
+                    continue
+                path = os.path.join(folder, name)
+                plain[stem] = path
+                match = _RAW_NAME.fullmatch(stem)
+                if match:
+                    raw = re.sub(r'[-_]', '', match.group('raw'))
+                    exact[(match.group('id'), bytes.fromhex(raw))] = path
+            _index[1].append((plain, exact))
+    return _index[1]
+
+
+def iconPath(type_id, data=None, exactOnly=False):
+    """
+    The patch icon file for an actor: one named after its ID and this raw data if there's
+    one (in any patch), otherwise (unless exactOnly) the one named after its ID; None if
+    there isn't one.
+    """
+    index = _iconIndex()
+    if data is not None:
+        key = (str(type_id), bytes(data))
+        for plain, exact in index:
+            if key in exact:
+                return exact[key]
+    if exactOnly:
+        return None
+    for plain, exact in index:
+        if str(type_id) in plain:
+            return plain[str(type_id)]
+    return None
+
+
+def _pngIcon(type_id, size, data=None):
+    path = iconPath(type_id, data)
+    if path is not None:
+        pix = QtGui.QPixmap(path)
+        if not pix.isNull():
+            return pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return None
 
 
@@ -171,17 +234,22 @@ def spriteIcon(type_id, size=48):
     return _cache[key]
 
 
-_levelCache = {}  # (type, size) -> QPixmap or None
+_levelCache = {}  # (icon path, size) -> QPixmap or None
 
 
-def levelIcon(type_id, size):
+def levelIcon(type_id, size, data=None, exactOnly=False):
     """
-    The patch's "<id>.png" icon for an actor drawn in the level instead of its ID box,
-    or None if there isn't one (the box stays then, rather than the Bowser picture).
+    The patch's icon for an actor drawn in the level ("<id>-<raw data>.png" for this data,
+    or, unless exactOnly, "<id>.png"), or None if there isn't one (the box or sprite image
+    stays then, rather than the Bowser picture).
     """
-    key = (type_id, size)
+    path = iconPath(type_id, data, exactOnly)
+    if path is None:
+        return None
+    key = (path, size)
     if key not in _levelCache:
-        _levelCache[key] = _pngIcon(type_id, size)
+        pix = QtGui.QPixmap(path)
+        _levelCache[key] = None if pix.isNull() else pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return _levelCache[key]
 
 
@@ -190,5 +258,7 @@ def isCached(type_id, size=48):
 
 
 def clearCache():
+    global _index
     _cache.clear()
     _levelCache.clear()
+    _index = None

@@ -169,6 +169,8 @@ class MiyamotoTheme:
         self.style = None
         self.forceUiColor = False
         self.forceStyleSheet = False
+        self.toolbarIconSize = None
+        self.base = None  # the theme this one is built on (its folder name)
         self.folder = None
         self.variableInputs = {}
         self.variables = None
@@ -249,6 +251,15 @@ class MiyamotoTheme:
             baseRoot = etree.parse(os.path.join(baseFolder, 'main.xml')).getroot()
             inputs.update(themevars.parse_variables(baseRoot))
             layers.append((baseFolder, baseRoot))
+            self.base = base
+            # What the base theme is drawn for, unless this theme says otherwise
+            if self.style is None:
+                self.style = baseRoot.attrib.get('style')
+            if self.toolbarIconSize is None and 'toolbarIconSize' in baseRoot.attrib:
+                try:
+                    self.toolbarIconSize = int(baseRoot.attrib['toolbarIconSize'])
+                except ValueError:
+                    pass
         inputs.update(themevars.parse_variables(root))
         layers.append((folder, root))
 
@@ -357,6 +368,13 @@ class MiyamotoTheme:
         if 'style' in root.attrib: self.style = root.attrib['style']
         if 'forceUiColor' in root.attrib: self.forceUiColor = True if root.attrib['forceUiColor'] == "true" else False
         if 'forceStyleSheet' in root.attrib: self.forceStyleSheet = True if root.attrib['forceStyleSheet'] == "true" else False
+        # The toolbar icon size the theme is drawn for (Preferences picks it with the theme)
+        self.toolbarIconSize = None
+        if 'toolbarIconSize' in root.attrib:
+            try:
+                self.toolbarIconSize = int(root.attrib['toolbarIconSize'])
+            except ValueError:
+                pass
         if 'version' in root.attrib:
             try:
                 self.version = float(root.attrib['version'])
@@ -437,6 +455,11 @@ class MiyamotoTheme:
         style = style.replace('{images}', (images or os.path.join(folder, 'images')).replace('\\', '/'))
         style = style.replace('{theme}', folder.replace('\\', '/'))
         self.styleSheet = (self.styleSheet + '\n' + style) if self.styleSheet else style
+
+    @property
+    def isClassic(self):
+        """True for the Legacy theme and the classic themes built on it."""
+        return themevars.CLASSIC_BASE in (self.base, os.path.basename(self.folder or ''))
 
     def color(self, name):
         """
@@ -594,9 +617,10 @@ TOOLBAR_ICON_SIZES = (16, 20, 24, 32, 40)
 
 
 def toolbarIconSize():
-    """The size of the main toolbar's icons, in pixels (Preferences > Themes)."""
+    """The size of the main toolbar's icons, in pixels (Preferences > Themes; until it's set, the theme's)."""
+    default = getattr(globals.theme, 'toolbarIconSize', None) or 24
     try:
-        size = int(setting('ToolbarIconSize', 24))
+        size = int(setting('ToolbarIconSize', default))
     except (TypeError, ValueError):
         size = 24
     return size if size in TOOLBAR_ICON_SIZES else 24

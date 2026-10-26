@@ -232,6 +232,110 @@ class HexSpinBox(QtWidgets.QSpinBox):
         return int(str(value), 16)
 
 
+class LargeSpinBox(QtWidgets.QAbstractSpinBox):
+    """
+    Integer spinbox without QSpinBox's signed 32-bit limit, used for sprite
+    value fields that are wider than 31 bits
+    """
+    valueChanged = QtCore.pyqtSignal(object)
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._min = 0
+        self._max = 99
+        self._value = 0
+
+        self.lineEdit().textEdited.connect(self._handleTextEdited)
+        self.editingFinished.connect(self._updateText)
+        self._updateText()
+
+    def minimum(self):
+        return self._min
+
+    def maximum(self):
+        return self._max
+
+    def setMinimum(self, value):
+        self.setRange(value, max(value, self._max))
+
+    def setMaximum(self, value):
+        self.setRange(min(self._min, value), value)
+
+    def setRange(self, lo, hi):
+        self._min = lo
+        self._max = max(lo, hi)
+        self.setValue(self._value)
+
+    def value(self):
+        return self._value
+
+    def setValue(self, value):
+        value = max(self._min, min(self._max, int(value)))
+        changed = value != self._value
+        self._value = value
+        self._updateText()
+
+        if changed:
+            self.valueChanged.emit(value)
+
+    def setSpecialValueText(self, text):
+        super().setSpecialValueText(text)
+        self._updateText()
+
+    def textFromValue(self, value):
+        if value == self._min and self.specialValueText():
+            return self.specialValueText()
+
+        return str(value)
+
+    def _updateText(self):
+        self.lineEdit().setText(self.textFromValue(self._value))
+
+    def _handleTextEdited(self, text):
+        try:
+            value = int(text)
+        except ValueError:
+            return
+
+        if self._min <= value <= self._max and value != self._value:
+            self._value = value
+            self.valueChanged.emit(value)
+
+    def validate(self, text, pos):
+        text = str(text)
+        if self.specialValueText() and text == self.specialValueText():
+            return (QtGui.QValidator.Acceptable, text, pos)
+
+        if text in ('', '-'):
+            return (QtGui.QValidator.Intermediate, text, pos)
+
+        try:
+            value = int(text)
+        except ValueError:
+            return (QtGui.QValidator.Invalid, text, pos)
+
+        if value > self._max or (value < 0 and self._min >= 0):
+            return (QtGui.QValidator.Invalid, text, pos)
+
+        if value < self._min:
+            return (QtGui.QValidator.Intermediate, text, pos)
+
+        return (QtGui.QValidator.Acceptable, text, pos)
+
+    def stepBy(self, steps):
+        self.setValue(self._value + steps)
+        self.selectAll()
+
+    def stepEnabled(self):
+        flags = QtWidgets.QAbstractSpinBox.StepEnabled(QtWidgets.QAbstractSpinBox.StepNone)
+        if self._value > self._min:
+            flags |= QtWidgets.QAbstractSpinBox.StepDownEnabled
+        if self._value < self._max:
+            flags |= QtWidgets.QAbstractSpinBox.StepUpEnabled
+
+        return flags
+
+
 class SpriteDefinition:
     """
     Stores and manages the data info for a specific sprite

@@ -9,7 +9,8 @@
 """
 The parts bar, after Super Mario Maker's: a row of the parts (tileset objects and actors)
 you used last, under the main toolbar. Click a part to paint with it, or drag it onto the
-level to place it there. The menu button at its left shows every part.
+level to place it there. The menu button at its left shows every part. The actor or object
+selected in the level is marked on it (and added if it isn't there).
 
 Parts are keys: ('obj', tileset slot, object number) or ('spr', actor type).
 """
@@ -129,7 +130,8 @@ def disarm():
                 call(widget)
             except RuntimeError:
                 pass
-    mw.statusBar().showMessage('Nothing picked: click things in the level to select and drag them.', 4000)
+    mw.statusBar().showMessage('Nothing picked: left click things in the level to select and drag them%s.'
+                               % (', right click to deselect' if globals.LegacyMouseControls else ''), 4000)
 
 
 def selectPart(key):
@@ -141,8 +143,11 @@ def selectPart(key):
     else:
         globals.CurrentPaintType = 4
         mw.SpriteChoiceChanged(key[1])
-    mw.statusBar().showMessage('%s - click in the level to place it (click it again, or press Esc, to put it down).'
-                               % partName(key), 6000)
+    if globals.LegacyMouseControls:
+        how = 'right click in the level to place it'
+    else:
+        how = 'click empty space in the level to place it, Alt+click to place it over things'
+    mw.statusBar().showMessage('%s - %s (click it again, or press Esc, to put it down).' % (partName(key), how), 6000)
 
 
 def mimeFor(key):
@@ -445,6 +450,13 @@ class PartsBar(QtWidgets.QToolBar):
         self.current = key
         for button in self.buttons:
             button.setChecked(button.key == key)
+
+    def showSelected(self, key):
+        """Marks the part selected in the level (None: nothing), adding it to the bar if it isn't on it."""
+        if key is not None and key not in self.keys and partIcon(key, BAR_ICON) is not None:
+            self.addRecent(key)
+        else:
+            self.markCurrent(key)
 
     def addRecent(self, key):
         """Puts a part at the front of the bar (Mario Maker style)."""

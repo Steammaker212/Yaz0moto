@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Night Mode"
+		version="1.0"
+		creator="Explos"
+		description="Night Mode from CoinKiller, with the original controls and icons."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#2F8EFF" />
+		<var name="background" value="#242424" />
+		<var name="text"       value="#E6E6E6" />
+		<var name="level"      value="#212121" />
+	</variables>
+
+</theme>

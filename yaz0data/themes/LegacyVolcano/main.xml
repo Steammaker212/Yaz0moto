@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- A classic theme, built on the Legacy theme: the original controls and icons in this theme's colours. -->
+<theme
+		format="1.0"
+		name="Legacy Volcano"
+		version="1.0"
+		creator="Yaz0moto"
+		description="The original Volcano theme, for volcano levels."
+		base="Legacy"
+		>
+
+	<variables>
+		<var name="accent"     value="#E0471B" />
+		<var name="background" value="#DCD7D7" />
+		<var name="text"       value="#000000" />
+		<var name="level"      value="#140A00" />
+	</variables>
+
+	<!-- The original theme's own level view colours -->
+	<colors file="levelview.xml" />
+
+</theme>

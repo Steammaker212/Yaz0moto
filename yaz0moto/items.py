@@ -1634,6 +1634,7 @@ class SpriteItem(LevelEditorItem):
     # A patch icon replacing the ID box is drawn this much larger than the box
     ICON_SCALE = 2.5
     customIcon = None
+    iconReplacesImage = False  # the icon is for this exact data, drawn instead of the sprite image
 
     def __init__(self, type, x, y, data, layer=0, initialState=0):
         """
@@ -1753,13 +1754,40 @@ class SpriteItem(LevelEditorItem):
         imgs = globals.gamedef.getImageClasses()
         if type in imgs:
             self.setImageObj(imgs[type])
-        else:
-            # A patch icon (icons/<id>.png) is drawn instead of the ID box; loaded at twice
-            # the drawn size so it stays sharp when zoomed in
-            from . import spriteicons
-            self.customIcon = spriteicons.levelIcon(type, int(globals.TileWidth * self.ICON_SCALE * 2))
-            if self.customIcon is not None:
-                self.UpdateRects()
+        elif self.updateCustomIcon():
+            self.UpdateRects()
+
+    def updateCustomIcon(self):
+        """
+        The patch icon drawn for this actor (see spriteicons): for an actor with a sprite
+        image, only an icon for its exact data (icons/<id>-<raw data>.png), drawn instead
+        of the image; for one without, that or icons/<id>.png, drawn instead of the ID box.
+        Loaded at twice the drawn size so it stays sharp when zoomed in. Returns True if it changed.
+        """
+        from . import spriteicons
+        hasImage = self.type in globals.gamedef.getImageClasses()
+        size = globals.TileWidth * self.ICON_SCALE
+        if hasImage:
+            size = max(self.ImageObj.width, self.ImageObj.height, 16) * globals.TileWidth / 16
+        icon = spriteicons.levelIcon(self.type, int(size * 2), self.spritedata, exactOnly=hasImage)
+        changed = icon is not self.customIcon or self.iconReplacesImage != (hasImage and icon is not None)
+        self.customIcon = icon
+        self.iconReplacesImage = hasImage and icon is not None
+        return changed
+
+    def imageRect(self):
+        """The area the sprite image is drawn in (from the item's origin)."""
+        scale = globals.TileWidth / 16
+        return QtCore.QRectF(0, 0, self.ImageObj.width * scale, self.ImageObj.height * scale)
+
+    def drawIcon(self, painter, rect):
+        """Draws the custom icon fitted (keeping its shape) and centred in rect."""
+        icon = self.customIcon
+        fit = QtCore.QSizeF(icon.size()).scaled(rect.size(), Qt.KeepAspectRatio)
+        target = QtCore.QRectF(QtCore.QPointF(0, 0), fit)
+        target.moveCenter(rect.center())
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+        painter.drawPixmap(target, icon, QtCore.QRectF(icon.rect()))
 
     def setImageObj(self, obj):
         """
@@ -1793,6 +1821,11 @@ class SpriteItem(LevelEditorItem):
         CurrentAuxRects = [auxObj.sceneBoundingRect() for auxObj in self.ImageObj.aux]
 
         self.ImageObj.dataChanged()
+
+        # An icon can be for one setting of the actor (icons/<id>-<raw data>.png); worked
+        # out after the image, whose size it's drawn at
+        if self.updateCustomIcon() and not globals.SpriteImagesShown:
+            self.UpdateRects()
 
         if globals.SpriteImagesShown:
             self.UpdateRects()
@@ -2049,10 +2082,10 @@ class SpriteItem(LevelEditorItem):
         return box.adjusted(-dx, -dy, dx, dy)
 
     def shape(self):
-        """With an icon, only the box is clicked and rubber-band selected, not the larger icon."""
+        """With an icon, the whole icon is clicked and rubber-band selected, like a sprite image."""
         if self.showsCustomIcon():
             path = QtGui.QPainterPath()
-            path.addRect(self.ImageObj.spritebox.BoundingRect)
+            path.addRect(self.iconRect())
             return path
         return super().shape()
 
@@ -2066,16 +2099,19 @@ class SpriteItem(LevelEditorItem):
             painter.setClipRect(option.exposedRect)
             painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
-        # Turn aux things on or off
+        # Turn aux things on or off (an icon for this setting of the actor replaces them too)
         for aux in self.ImageObj.aux:
-            aux.setVisible(globals.SpriteImagesShown)
+            aux.setVisible(globals.SpriteImagesShown and not self.iconReplacesImage)
 
         # Default spritebox
         drawSpritebox = True
         spriteboxRect = QtCore.QRectF(1, 1, globals.TileWidth - 2, globals.TileWidth - 2)
 
         if globals.SpriteImagesShown or overrideGlobals:
-            self.ImageObj.paint(painter)
+            if self.iconReplacesImage:
+                self.drawIcon(painter, self.imageRect())
+            else:
+                self.ImageObj.paint(painter)
 
             drawSpritebox = self.ImageObj.spritebox.shown
 

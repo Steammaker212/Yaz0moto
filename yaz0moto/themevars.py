@@ -12,6 +12,10 @@ with ${name} placeholders; a theme only chooses a few colours (accent, backgroun
 text, level background) and a roundness, and every other shade is worked out here,
 for light themes as well as dark ones. Other themes are built on it by setting
 base="Yaz0moto" and their own <variables> in their main.xml.
+
+Classic themes work the same way on the Legacy theme (base="Legacy"): the original
+icons and plain controls, with the window and level view colours worked out from the
+same inputs (roundness isn't used there).
 """
 
 import os
@@ -19,6 +23,7 @@ import re
 from xml.sax.saxutils import quoteattr
 
 BASE_THEME = 'Yaz0moto'
+CLASSIC_BASE = 'Legacy'
 
 # What a theme (or the theme editor) chooses; everything else is derived
 INPUTS = ('accent', 'background', 'text', 'level', 'roundness')
@@ -142,6 +147,8 @@ def derive(inputs=None):
     }
     out.update(shades)
     out['badge'] = out['panel']  # the ring cut around icon badges matches the toolbar
+    # Text drawn on the level view (zone names), readable on the level background
+    out['level_text'] = '#F5F5F5' if luminance(out['level']) < 0.4 else '#1B1B1E'
     return out
 
 
@@ -170,19 +177,21 @@ def parse_variables(root):
     return out
 
 
-def write_theme(folder, name, inputs, creator='', description=''):
+def write_theme(folder, name, inputs, creator='', description='', base=BASE_THEME):
     """
-    Saves a theme built on the Yaz0moto theme: a folder with a main.xml holding the
-    chosen inputs. Returns the folder.
+    Saves a theme built on the Yaz0moto theme (or, with base=CLASSIC_BASE, a classic one):
+    a folder with a main.xml holding the chosen inputs. Returns the folder.
     """
     os.makedirs(folder, exist_ok=True)
     lines = [
         '<?xml version="1.0"?>',
-        '<theme format="1.0" name=%s version="1.0" creator=%s description=%s base="%s">'
-        % (quoteattr(name), quoteattr(creator or 'You'), quoteattr(description or 'Made with the theme editor.'), BASE_THEME),
+        '<theme format="1.0" name=%s version="1.0" creator=%s description=%s base=%s>'
+        % (quoteattr(name), quoteattr(creator or 'You'), quoteattr(description or 'Made with the theme editor.'), quoteattr(base)),
         '\t<variables>',
     ]
     for key in INPUTS:
+        if key == 'roundness' and base == CLASSIC_BASE:
+            continue  # classic controls aren't rounded
         value = inputs.get(key, DEFAULTS[key])
         if value not in (None, ''):
             lines.append('\t\t<var name="%s" value=%s />' % (key, quoteattr(str(value))))

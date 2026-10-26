@@ -77,6 +77,7 @@ DirtyOverride = 0
 AutoSaveDirty = False
 OverrideSnapping = False
 PlaceObjectFullSize = False
+LegacyMouseControls = False  # the level view's original controls: right click places
 CurrentPaintType = -1
 CurrentObject = -1
 CurrentSprite = -1
