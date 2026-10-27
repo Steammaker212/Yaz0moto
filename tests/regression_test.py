@@ -29,7 +29,7 @@ except ImportError:
     sys.modules['fastyz'] = types.SimpleNamespace(compress=lambda d: b'Yaz0' + bytes(12) + d,
                                                   decompress=lambda d: d[16:])
 
-from PyQt5 import QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 app = QtWidgets.QApplication([])
 
 from yaz0moto import globals
@@ -347,6 +347,35 @@ check('the raw data can also follow an underscore, without dashes, in any case',
 check('only an icon for the exact data replaces a sprite image (not <id>.png)',
       spriteicons.levelIcon(7, 40, data7, exactOnly=True) is not None
       and spriteicons.levelIcon(7, 40, bytes(12), exactOnly=True) is None)
+check('a square or not-exact-multiple icon covers 1 tile',
+      spriteicons.tileSpan(20, 20) == (1, 1) and spriteicons.tileSpan(301, 100) == (1, 1)
+      and spriteicons.tileSpan(150, 100) == (1, 1))
+check('an icon N times wider or taller covers N tiles across or down',
+      spriteicons.tileSpan(300, 100) == (3, 1) and spriteicons.tileSpan(16, 64) == (1, 4))
+wide = QtGui.QPixmap(60, 20)
+wide.fill(QtGui.QColor('#FFFF00'))
+wide.save(os.path.join(patch, 'icons', '6.png'))
+spriteicons.clearCache()
+check('a 3:1 level icon spans 3 tiles and is loaded at that size',
+      spriteicons.levelIconSpan(6) == (3, 1)
+      and spriteicons.levelIcon(6, 40, tiled=True).size() == QtCore.QSize(120, 40))
+from yaz0moto.items import SpriteItem
+tw = globals.TileWidth
+box = types.SimpleNamespace(BoundingRect=QtCore.QRectF(0, 0, tw, tw))
+def placed(span, replaces=False, offset=(0, 0)):
+    fake = types.SimpleNamespace(iconSpan=span, iconReplacesImage=replaces,
+                                 ImageObj=types.SimpleNamespace(spritebox=box, xOffset=offset[0], yOffset=offset[1]))
+    return SpriteItem.iconRect(fake)
+check('an icon over 900px on a side covers twice the tiles each way',
+      spriteicons.tileSpan(1000, 1000) == (2, 2) and spriteicons.tileSpan(320, 960) == (2, 6)
+      and spriteicons.tileSpan(901, 300) == (2, 2) and spriteicons.tileSpan(900, 300) == (3, 1))
+check('a big icon grows to each side and up from the actor\'s tile',
+      placed((2, 2)) == QtCore.QRectF(-tw / 2, -tw, 2 * tw, 2 * tw))
+check('a 1 tile icon covers just the actor\'s tile', placed((1, 1)) == QtCore.QRectF(0, 0, tw, tw))
+check('a wide icon is centred on the actor\'s tile', placed((3, 1)) == QtCore.QRectF(-tw, 0, 3 * tw, tw))
+check('a tall icon goes up from the actor\'s tile', placed((1, 4)) == QtCore.QRectF(0, -3 * tw, tw, 4 * tw))
+check('an icon replacing a sprite image sits on the actor\'s tile, not the image\'s corner',
+      placed((1, 2), True, (-8, -16)) == QtCore.QRectF(tw / 2, 0, tw, 2 * tw))
 check('the palette keeps the <id>.png icon',QtGui.QColor(spriteicons.spriteIcon(7, 48).toImage().pixel(24, 24)).name() == '#ff0000')
 
 # ---------------------------------------------------------------- parts bar

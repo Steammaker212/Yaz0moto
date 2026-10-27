@@ -234,22 +234,59 @@ def spriteIcon(type_id, size=48):
     return _cache[key]
 
 
-_levelCache = {}  # (icon path, size) -> QPixmap or None
+_levelCache = {}  # (icon path, size, tiled) -> QPixmap or None
+_spanCache = {}  # icon path -> (columns, rows)
+BIG_ICON = 900  # level icons with a side over this many pixels cover twice the tiles each way
 
 
-def levelIcon(type_id, size, data=None, exactOnly=False):
+def tileSpan(width, height):
+    """
+    How many tiles an icon width x height pixels covers: N x 1 (or 1 x N) when one side is
+    exactly N times the other, otherwise (a square, or not an exact multiple) 1 x 1. A big
+    image (either side over BIG_ICON pixels) covers twice that each way: 2 x 2, 2N x 2, ...
+    """
+    if width <= 0 or height <= 0:
+        return (1, 1)
+    if width > height and width % height == 0:
+        span = (width // height, 1)
+    elif height > width and height % width == 0:
+        span = (1, height // width)
+    else:
+        span = (1, 1)
+    if max(width, height) > BIG_ICON:
+        span = (span[0] * 2, span[1] * 2)
+    return span
+
+
+def levelIconSpan(type_id, data=None, exactOnly=False):
+    """The tiles (columns, rows) the level icon covers, from the PNG's own size (see tileSpan)."""
+    path = iconPath(type_id, data, exactOnly)
+    if path is None:
+        return (1, 1)
+    if path not in _spanCache:
+        size = QtGui.QImageReader(path).size()
+        _spanCache[path] = tileSpan(size.width(), size.height())
+    return _spanCache[path]
+
+
+def levelIcon(type_id, size, data=None, exactOnly=False, tiled=False):
     """
     The patch's icon for an actor drawn in the level ("<id>-<raw data>.png" for this data,
     or, unless exactOnly, "<id>.png"), or None if there isn't one (the box or sprite image
-    stays then, rather than the Bowser picture).
+    stays then, rather than the Bowser picture). size is per tile when tiled (the icon then
+    fits the tiles levelIconSpan gives), otherwise the whole icon fits size x size.
     """
     path = iconPath(type_id, data, exactOnly)
     if path is None:
         return None
-    key = (path, size)
+    key = (path, size, tiled)
     if key not in _levelCache:
         pix = QtGui.QPixmap(path)
-        _levelCache[key] = None if pix.isNull() else pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if pix.isNull():
+            _levelCache[key] = None
+        else:
+            cols, rows = levelIconSpan(type_id, data, exactOnly) if tiled else (1, 1)
+            _levelCache[key] = pix.scaled(size * cols, size * rows, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return _levelCache[key]
 
 
@@ -261,4 +298,5 @@ def clearCache():
     global _index
     _cache.clear()
     _levelCache.clear()
+    _spanCache.clear()
     _index = None
