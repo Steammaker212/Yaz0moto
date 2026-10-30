@@ -1633,6 +1633,7 @@ class SpriteItem(LevelEditorItem):
 
     customIcon = None
     iconSpan = (1, 1)  # tiles (columns, rows) a patch icon replacing the ID box covers
+    iconAnchor = None  # a Y0MI_ icon's placement, (up, right, centreV, centreH), see spriteicons
     iconReplacesImage = False  # the icon is for this exact data, drawn instead of the sprite image
 
     def __init__(self, type, x, y, data, layer=0, initialState=0):
@@ -1770,18 +1771,21 @@ class SpriteItem(LevelEditorItem):
         hasImage = self.type in globals.gamedef.getImageClasses()
         icon = spriteicons.levelIcon(self.type, int(globals.TileWidth * 2), self.spritedata,
                                      exactOnly=hasImage, tiled=True)
-        span = spriteicons.levelIconSpan(self.type, self.spritedata, exactOnly=hasImage)
-        changed = (icon is not self.customIcon or span != self.iconSpan
+        cols, rows, anchor = spriteicons.levelIconLayout(self.type, self.spritedata, exactOnly=hasImage)
+        span = (cols, rows)
+        changed = (icon is not self.customIcon or span != self.iconSpan or anchor != self.iconAnchor
                    or self.iconReplacesImage != (hasImage and icon is not None))
         self.customIcon = icon
         self.iconSpan = span
+        self.iconAnchor = anchor
         self.iconReplacesImage = hasImage and icon is not None
         return changed
 
     def drawIcon(self, painter, rect):
-        """Draws the custom icon fitted (keeping its shape) and centred in rect."""
+        """Draws the custom icon fitted (keeping its shape, unless it's a Y0MI_ one) and centred in rect."""
         icon = self.customIcon
-        fit = QtCore.QSizeF(icon.size()).scaled(rect.size(), Qt.KeepAspectRatio)
+        mode = Qt.IgnoreAspectRatio if self.iconAnchor is not None else Qt.KeepAspectRatio
+        fit = QtCore.QSizeF(icon.size()).scaled(rect.size(), mode)
         target = QtCore.QRectF(QtCore.QPointF(0, 0), fit)
         target.moveCenter(rect.center())
         painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
@@ -2084,7 +2088,9 @@ class SpriteItem(LevelEditorItem):
     def iconRect(self):
         """
         Where the icon is drawn: iconSpan tiles with the actor's own tile at the bottom
-        middle, so a wide or big icon grows to each side and up, and a tall one up.
+        middle, so a wide or big icon grows to each side and up, and a tall one up. A Y0MI_
+        icon is placed as its name says (iconAnchor): up or down, right or left of the
+        actor's tile, or centred on it (by half tiles if need be).
         """
         if self.iconReplacesImage:
             # The item's origin is the sprite image's corner, offset from the actor's tile
@@ -2095,7 +2101,23 @@ class SpriteItem(LevelEditorItem):
             tile = self.ImageObj.spritebox.BoundingRect
         cols, rows = self.iconSpan
         width, height = tile.width() * cols, tile.height() * rows
-        return QtCore.QRectF(tile.center().x() - width / 2, tile.bottom() - height, width, height)
+        if self.iconAnchor is None:
+            return QtCore.QRectF(tile.center().x() - width / 2, tile.bottom() - height, width, height)
+
+        up, right, centreV, centreH = self.iconAnchor
+        if centreH:
+            x = tile.center().x() - width / 2
+        elif right:
+            x = tile.left()
+        else:
+            x = tile.right() - width
+        if centreV:
+            y = tile.center().y() - height / 2
+        elif up:
+            y = tile.bottom() - height
+        else:
+            y = tile.top()
+        return QtCore.QRectF(x, y, width, height)
 
     def shape(self):
         """With an icon, the whole icon is clicked and rubber-band selected, like a sprite image."""

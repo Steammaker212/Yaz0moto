@@ -1,4 +1,4 @@
-"""
+﻿"""
 Smoke test for New Super Mario Bros. U Deluxe support.
 
 Builds a fake Deluxe install (Course/ + Unit/ with a synthetic tileset), then drives
@@ -12,7 +12,7 @@ Run from anywhere:   python tests/deluxe_smoke_test.py
 Needs PyQt5 and the compiled/pyximport extensions Pyamoto already requires.
 """
 import faulthandler; faulthandler.dump_traceback_later(280, exit=True)
-import sys, os, struct, tempfile, random, shutil
+import sys, os, struct, subprocess, tempfile, random, shutil
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -325,6 +325,150 @@ if os.path.isfile(_wiiu):
     check('real tileset: 156 objects', before['objects'] == 156)
     for key in before:
         check('real tileset converted to Deluxe keeps its %s' % key, before[key] == after[key])
+
+    # Import Tileset from Objects: every object exported, zipped inside a folder, imported back
+    import zipfile
+    objdir = os.path.join(tmp, 'objects', 'tileset_0')
+    os.makedirs(objdir)
+    for n in range(len(real.tileset.objects)):
+        real.exportObject(os.path.join(objdir, 'tileset_0_object_%d' % n), 'tileset_0_object_%d' % n, n)
+    objzip = os.path.join(tmp, 'objects.zip')
+    with zipfile.ZipFile(objzip, 'w') as z:
+        for f in os.listdir(objdir):
+            z.write(os.path.join(objdir, f), 'tileset_0/' + f)
+
+    def importObjects(editor, path, isZip):
+        button = [None]
+        def pick(box):
+            button[0] = [b for b in box.buttons() if b.text() == ('ZIP/RAR File...' if isZip else 'Folder...')][0]
+            return 0
+        with mock.patch.object(QtWidgets.QMessageBox, 'exec_', pick), \
+             mock.patch.object(QtWidgets.QMessageBox, 'clickedButton', lambda box: button[0]), \
+             mock.patch.object(QtWidgets.QMessageBox, 'question', return_value=QtWidgets.QMessageBox.Yes), \
+             mock.patch.object(QtWidgets.QMessageBox, 'information') as info, \
+             mock.patch.object(QtWidgets.QFileDialog, 'getOpenFileName', return_value=(path, '')), \
+             mock.patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=path):
+            editor.importTilesetFromObjects()
+        return info.call_args[0][2] if info.called else None
+
+    shapes = lambda e: [(o.width, o.height) for o in e.tileset.objects]
+    target = win.editors[2]                               # a blank slot of the open window
+    message = importObjects(target, objzip, True)
+    print('   ', message)
+    check('Import Tileset from Objects reads a ZIP with a folder of objects, in order',
+          shapes(target) == shapes(real) and 'could not' not in message)
+    def looks(e, other):
+        """Each object's tiles (image, normal map, collision), where `other` has a tile of its own."""
+        out = []
+        for o, p in zip(e.tileset.objects, other.tileset.objects):
+            for row, prow in zip(o.tiles, p.tiles):
+                for t, pt in zip(row, prow):
+                    if pt[2] & 3:
+                        tile = e.tileset.tiles[t[1]]
+                        out.append((_h(_raw(tile.image)), _h(_raw(tile.normalmap)), tile.getCollision()))
+        return out
+    check('objects imported as a tileset look the same, sharing tiles that are the same',
+          looks(target, target) == looks(real, target)
+          and len(target.tileset.getUsedTiles()) <= len(real.tileset.getUsedTiles()))
+    target = win.editors[3]                               # the one Import Tileset from file filled
+    importObjects(target, objdir, False)
+    check('Import Tileset from Objects reads a folder of objects', shapes(target) == shapes(real))
+    flatzip = os.path.join(tmp, 'flat.zip')
+    with zipfile.ZipFile(flatzip, 'w') as z:
+        for f in os.listdir(objdir)[:12]:
+            z.write(os.path.join(objdir, f), f)
+    # RAR and 7z files are unpacked by another program (no RAR can be made here, but 7-Zip
+    # can make a 7z, which goes the same way)
+    sevenZip = [c[0] for c in puzzle._unpackCommands('x', tmp) if '7z' in os.path.basename(c[0]).lower()]
+    if sevenZip:
+        archive7z = os.path.join(tmp, 'objects.7z')
+        subprocess.run([sevenZip[0], 'a', archive7z, objdir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        target = win.editors[1]
+        importObjects(target, archive7z, True)
+        check('Import Tileset from Objects unpacks archives that are not ZIPs with another program',
+              shapes(target) == shapes(real))
+    # A tileset can only have 256 objects (levels store the number in a byte)
+    for f in [f for f in os.listdir(objdir) if f.endswith('.json')]:
+        shutil.copy(os.path.join(objdir, f), os.path.join(objdir, 'copy_' + f))  # 312 objects
+    target = win.editors[2]
+    message = importObjects(target, objdir, False)
+    check('Import Tileset from Objects stops at 256 objects and says so',
+          len(target.tileset.objects) == 256 and 'left out' in message)
+    target.tileset.addObject(1, 1, 0, [0, 0], [0, 0], [[[0, 1, 2]]])
+    with mock.patch.object(QtWidgets.QMessageBox, 'question', return_value=QtWidgets.QMessageBox.Yes):
+        fits = target._fitObjectLimit()
+    check('saving a tileset with more than 256 objects offers to keep the first 256',
+          fits and len(target.tileset.objects) == 256)
+    importObjects(target, flatzip, True)  # into the tileset just filled
+    check('Import Tileset from Objects reads a ZIP of the files themselves, replacing the old objects',
+          0 < len(target.tileset.objects) < len(real.tileset.objects))
+
+# ---------- Properties tab: paints tiles' collision, and shows it while open
+ed = win.editors[2]
+pal = ed.paletteWidget
+ed.sideTabWidget.setCurrentIndex(1)
+shownElsewhere = ed.showCollisionBtn.isChecked()
+ed.sideTabWidget.setCurrentIndex(0)
+check('the Properties tab shows the collision while open, and puts it back after',
+      ed.showCollisionBtn.isChecked() and not shownElsewhere)
+check('the Default core type\'s parameters can be picked',
+      not pal.params1Group.isHidden() and len(pal.params1Grid.buttons) == 2)
+from PyQt5.QtTest import QTest
+win.tabs.setCurrentWidget(ed); win.resize(1100, 760); win.show(); QTest.qWait(100)
+view = ed.tileDisplay.viewport()
+at = lambda row: ed.tileDisplay.visualRect(ed.model.index(row, 0)).center()
+for grid, i in ((pal.coreGrid, 11), (pal.params1Grid, 3), (pal.collisionGrid, 5), (pal.terrainGrid, 4)):
+    QTest.mouseClick(grid.buttons[i], Qt.LeftButton)                  # slope, upslope 2, solid slide, desert sand
+check('the Properties tab says what clicking a tile gives it',
+      all(s in pal.summaryLabel.text() for s in ('Slope', 'Upslope 2', 'Solid Slide', 'Desert Sand')))
+for row in range(40, 45):
+    ed.tileset.tiles[row].setCollision(0)
+ed._paintUndo.clear()
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, at(40))
+t40 = ed.tileset.tiles[40]
+check('clicking a tile with the Properties tab open gives it those properties',
+      (t40.coreType, t40.params, t40.solidity, t40.slide, t40.terrain) == (11, 3, 1, 1, 4) and ed.isDirty
+      and 'Slope' in ed.infoLabel.text())
+QTest.mousePress(view, Qt.LeftButton, Qt.NoModifier, at(41))
+from PyQt5 import QtCore
+for row in (42, 43):                                                  # QTest.mouseMove can't hold a button
+    QtWidgets.QApplication.sendEvent(view, QtGui.QMouseEvent(QtCore.QEvent.MouseMove, QtCore.QPointF(at(row)),
+                                                            Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+QTest.mouseRelease(view, Qt.LeftButton, Qt.NoModifier, at(43))
+check('dragging over tiles paints them all', all(ed.tileset.tiles[r].getCollision() == t40.getCollision() for r in (41, 42, 43))
+      and ed.tileset.tiles[44].getCollision() == 0)
+QTest.keyClick(ed.tileDisplay, Qt.Key_Z, Qt.ControlModifier)
+check('Ctrl+Z undoes the last stroke', all(ed.tileset.tiles[r].getCollision() == 0 for r in (41, 42, 43))
+      and ed.tileset.tiles[40].getCollision() == t40.getCollision())
+ed.sideTabWidget.setCurrentIndex(2 if ed.sideTabWidget.isTabEnabled(2) else 1)
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, at(44))
+check('clicking a tile with another tab open leaves it alone', ed.tileset.tiles[44].getCollision() == 0)
+ed.sideTabWidget.setCurrentIndex(0)
+QTest.mouseClick(pal.coreGrid.buttons[0], Qt.LeftButton); QTest.mouseClick(pal.collisionGrid.buttons[0], Qt.LeftButton)
+QTest.mouseClick(view, Qt.LeftButton, Qt.AltModifier, at(40))
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, at(44))
+check('Alt + click picks a tile\'s properties, to give them to others',
+      ed.tileset.tiles[44].getCollision() == t40.getCollision() and 'Slope' in pal.summaryLabel.text())
+ed.pickProperties(12)
+check('Pick these properties (right-click menu) does the same', ed.sideTabWidget.currentIndex() == 0)
+QTest.mouseClick(pal.collisionGrid.buttons[2], Qt.LeftButton)        # Solid-on-Top, as it was left
+QTest.mouseClick(pal.coreGrid.buttons[15], Qt.LeftButton)            # Damage Tile
+spikes = []
+for param in (3, 4, 5, 6):                                            # left, right, up, down
+    QTest.mouseClick(pal.params1Grid.buttons[param], Qt.LeftButton)
+    QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, at(50 + param))
+    t = ed.tileset.tiles[50 + param]
+    spikes.append((t.coreType, t.params, t.solidity))
+QTest.mouseClick(pal.params1Grid.buttons[8], Qt.LeftButton)          # lava
+check('picking spikes makes them Solid, so they face their way (and lava has no solidity)',
+      spikes == [(15, p, 1) for p in (3, 4, 5, 6)] and pal.collisionGrid.currentIndex() == 0)
+QTest.mouseClick(pal.collisionGrid.buttons[1], Qt.LeftButton)        # Solid, as it was left
+QTest.mouseClick(pal.coreGrid.buttons[19], Qt.LeftButton)            # Cave Entrance
+QTest.mouseClick(pal.params1Grid.buttons[1], Qt.LeftButton)          # right
+QTest.mouseClick(view, Qt.LeftButton, Qt.NoModifier, at(60))
+t60 = ed.tileset.tiles[60]
+check('picking a cave entrance makes it walk-through, facing the way picked',
+      (t60.coreType, t60.params, t60.solidity) == (19, 1, 0) and 'Cave Entrance (Right)' in pal.summaryLabel.text())
 
 shutil.rmtree(tmp, ignore_errors=True)
 print('\n%d/%d passed' % (sum(ok for _, ok in results), len(results)))

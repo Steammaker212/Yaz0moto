@@ -10,8 +10,12 @@ import os
 import os.path
 import platform
 import re
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
+import zipfile
 import zlib
 
 from ctypes import create_string_buffer
@@ -29,6 +33,10 @@ from .tileset import updateCollisionOverlay
 
 Tileset = None
 window = None
+
+# Objects a tileset can have: levels store an object's number in a byte
+MAX_OBJECTS = 256
+
 
 class TilesetEditor(QtWidgets.QWidget):
     def __init__(self, parent_window, name, data, slot, con):
@@ -139,12 +147,19 @@ class TilesetEditor(QtWidgets.QWidget):
         self.sideTabWidget.addTab(self.objContainer, 'Objects')
         self.sideTabWidget.addTab(self.animWidget, 'Animations')
         self.sideTabWidget.setTabEnabled(2, self.slot == 0)
-        
+        self._collisionShownBefore = None
+        self.sideTabWidget.currentChanged.connect(self.sideTabChanged)
+        self.sideTabChanged(self.sideTabWidget.currentIndex())
+
         upperLayout.addWidget(self.sideTabWidget, 2)
         layout.addLayout(upperLayout)
 
         # Connections
-        self.tileDisplay.clicked.connect(self.paintFormat)
+        # Painting properties onto tiles is done by tileDisplay's mouse handling
+        self._stroke = None
+        self._paintUndo = []
+        undo = QtWidgets.QShortcut(QtGui.QKeySequence.Undo, self, self.undoPaint)
+        undo.setContext(Qt.WidgetWithChildrenShortcut)
         self.tileDisplay.mouseMoved.connect(self.updateInfo)
         self.objectList.clicked.connect(self.tileWidget.setObject)
 
@@ -493,6 +508,8 @@ class TilesetEditor(QtWidgets.QWidget):
 
 
     def saveTileset(self):
+        if not self._fitObjectLimit():
+            return
         previousName = eval('globals.Area.tileset%d' % self.slot)
 
         if self.slot == 0:
@@ -1070,8 +1087,32 @@ class TilesetEditor(QtWidgets.QWidget):
         self.tileWidget.update()
         self.setDirty()
 
+    def _fitObjectLimit(self):
+        """
+        Levels can only use a tileset's first MAX_OBJECTS objects (they store the object's
+        number in a byte), so offers to save just those. False if the save is cancelled.
+        """
+        extra = len(self.tileset.objects) - MAX_OBJECTS
+        if extra <= 0:
+            return True
+        answer = QtWidgets.QMessageBox.question(
+            self.window, "Too Many Objects",
+            "This tileset has %d objects, but a tileset can only have %d: levels can't use the "
+            "other %d.\n\nSave it with only the first %d objects?"
+            % (len(self.tileset.objects), MAX_OBJECTS, extra, MAX_OBJECTS))
+        if answer != QtWidgets.QMessageBox.Yes:
+            return False
+        del self.tileset.objects[MAX_OBJECTS:]
+        SetupObjectModel(self.objmodel, self, self.tileset.objects, self.tileset.tiles)
+        self.objectList.update()
+        self.tileWidget.update()
+        self.setuptile()
+        return True
+
     def _importSingleObject(self, jsonData, dirPath):
         """Import one object from (jsonData, dirPath) into this tileset. Returns True on success."""
+        if len(self.tileset.objects) >= MAX_OBJECTS:
+            return False, "too many objects"
         usedTiles = self.tileset.getUsedTiles()
         if len(usedTiles) >= 256:
             return False, "no room"
@@ -1423,8 +1464,160 @@ class TilesetEditor(QtWidgets.QWidget):
         self.tileDisplay.update()
         self.setDirty()
 
+    def _mergeDuplicateTiles(self, hashes):
+        """
+        Makes the objects share tiles that are the same (image, normal map and collision),
+        freeing the copies: objects exported from one tileset share tiles, and importing
+        them one by one gives each its own. Tiles of random objects (a run of tiles) and
+        the main tileset's tile 0 and overridden tiles are left as they are.
+        hashes caches the pixmaps' hashes between calls.
+        """
+        def mine(tile):
+            return tile[2] & 3 or not self.slot
+
+        def pixHash(pix):
+            key = pix.cacheKey()
+            if key not in hashes:
+                image = pix.toImage().convertToFormat(QtGui.QImage.Format_ARGB32)
+                bits = image.constBits()
+                bits.setsize(image.byteCount())
+                hashes[key] = hash(bytes(bits))
+            return hashes[key]
+
+        protected = {0} if self.slot == 0 else set()
+        if self.slot == 0:
+            protected.update(i for i, tile in enumerate(self.tileset.overrides) if tile is not None)
+        for obj in self.tileset.objects:
+            if obj.randLen:
+                for row in obj.tiles:
+                    for tile in row:
+                        if mine(tile):
+                            protected.update(range(tile[1], tile[1] + obj.randLen))
+
+        used = sorted({tile[1] for obj in self.tileset.objects if not obj.randLen
+                       for row in obj.tiles for tile in row if mine(tile)} - protected)
+        first, remap = {}, {}
+        for idx in used:
+            tile = self.tileset.tiles[idx]
+            key = (pixHash(tile.image), pixHash(tile.normalmap), tile.getCollision())
+            if key in first:
+                remap[idx] = first[key]
+            else:
+                first[key] = idx
+        if not remap:
+            return
+
+        for obj in self.tileset.objects:
+            if obj.randLen:
+                continue
+            for row in obj.tiles:
+                for i, tile in enumerate(row):
+                    if mine(tile) and tile[1] in remap:
+                        row[i] = type(tile)((tile[0], remap[tile[1]], tile[2]))
+
+        blank = QtGui.QPixmap(60, 60)
+        blank.fill(Qt.transparent)
+        for idx in remap:
+            self.tileset.tiles[idx].image = blank
+            self.tileset.tiles[idx].normalmap = blank
+            self.tileset.tiles[idx].setCollision(0)
+
+    def importTilesetFromObjects(self):
+        """
+        Replaces this tileset with objects exported by Export all objects: a folder of them,
+        or a ZIP or RAR (or 7z) of the files or of one folder with the files in it. The
+        objects are added in name order, so they keep their numbers.
+        """
+        ask = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Question, "Import Tileset from Objects",
+                                    "Import the objects from a ZIP or RAR file, or from a folder?",
+                                    parent=self.window)
+        fileButton = ask.addButton("ZIP/RAR File...", QtWidgets.QMessageBox.AcceptRole)
+        folderButton = ask.addButton("Folder...", QtWidgets.QMessageBox.AcceptRole)
+        ask.addButton(QtWidgets.QMessageBox.Cancel)
+        ask.exec_()
+
+        if ask.clickedButton() is fileButton:
+            path = QtWidgets.QFileDialog.getOpenFileName(self.window, "Import Tileset from Objects", '',
+                                                         "Archives (*.zip *.rar *.7z);;All files (*)")[0]
+        elif ask.clickedButton() is folderButton:
+            path = QtWidgets.QFileDialog.getExistingDirectory(self.window, "Import Tileset from Objects")
+        else:
+            return
+        if not path:
+            return
+
+        with tempfile.TemporaryDirectory(prefix='yaz0moto-objects-') as tmp:
+            root = path
+            if os.path.isfile(path):
+                QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+                try:
+                    problem = extractArchive(path, tmp)
+                finally:
+                    QtWidgets.QApplication.restoreOverrideCursor()
+                if problem:
+                    QtWidgets.QMessageBox.warning(self.window, "Import Tileset from Objects", problem)
+                    return
+                root = tmp
+
+            dirPath = findObjectFolder(root)
+            if dirPath is None:
+                QtWidgets.QMessageBox.warning(
+                    self.window, "Import Tileset from Objects",
+                    "No objects were found there.\n\nEach object needs its .json file, with the "
+                    ".png, _nml.png, .colls, .meta and .objlyt files it names next to it "
+                    "(as Objects > Export all objects... writes them).")
+                return
+            objects = loadObjectFolder(dirPath)
+
+            if self.tileset.objects or self.tileset.getUsedTiles():
+                answer = QtWidgets.QMessageBox.question(
+                    self.window, "Import Tileset from Objects",
+                    "This replaces every tile and object in this tileset with the %d objects found. "
+                    "Continue?" % len(objects))
+                if answer != QtWidgets.QMessageBox.Yes:
+                    return
+
+            # Start from a blank tileset, then add the objects in order (the files are read now)
+            self.tileset.clear()
+            self.newTileset()
+            SetupObjectModel(self.objmodel, self, self.tileset.objects, self.tileset.tiles)
+
+            imported = failed = 0
+            hashes = {}
+            for name, jsonData in objects:
+                if len(self.tileset.objects) >= MAX_OBJECTS:
+                    break
+                try:
+                    ok, _ = self._importSingleObject(jsonData, dirPath)
+                except Exception:
+                    ok = False
+                if ok:
+                    imported += 1
+                    self._mergeDuplicateTiles(hashes)  # makes room for the next objects
+                else:
+                    failed += 1
+            leftOut = len(objects) - imported - failed
+
+        self.setuptile()
+        SetupObjectModel(self.objmodel, self, self.tileset.objects, self.tileset.tiles)
+        self.objectList.update()
+        self.tileWidget.update()
+        self.setDirty()
+
+        message = "%d object%s imported." % (imported, '' if imported == 1 else 's')
+        if failed:
+            message += ("\n%d could not be imported (there was no room left in the tileset, "
+                        "or their files are damaged)." % failed)
+        if leftOut:
+            message += ("\nThe last %d were left out: a tileset can only have %d objects "
+                        "(levels can't use any more)." % (leftOut, MAX_OBJECTS))
+        QtWidgets.QMessageBox.information(self.window, "Import Tileset from Objects", message)
+
     def updateInfo(self, x, y):
-        index = self.tileDisplay.indexAt(QtCore.QPoint(int(x), int(y))).row()
+        self.showTileInfo(self.tileDisplay.indexAt(QtCore.QPoint(int(x), int(y))).row())
+
+    def showTileInfo(self, index):
+        """Shows a tile's properties above the tiles."""
         if index < 0 or index >= len(self.tileset.tiles):
             return
 
@@ -1477,42 +1670,67 @@ class TilesetEditor(QtWidgets.QWidget):
         
         self.infoLabel.setText(f"Core: {palette.coreTypes[curTile.coreType][0]} • Param: {parameter[0]} • Collision: {propertyText}\n{hex_data} • Terrain: {palette.terrainTypes[curTile.terrain][0]}")
 
+    # ---- Painting properties onto tiles (the Properties tab) ----
+    #
+    # With the Properties tab open, clicking a tile (or dragging over tiles) gives it the
+    # properties picked there; Alt + click or a middle click picks a tile's properties
+    # instead, and Ctrl+Z undoes the last strokes.
+
     def paintFormat(self, index):
-        if self.sideTabWidget.currentIndex() == 1:
+        """Gives one tile the picked properties, as a click does (Properties tab only)."""
+        if self.sideTabWidget.currentIndex() != 0:
             return
+        self.beginPaintStroke()
+        self.paintTile(index.row())
+        self.endPaintStroke()
 
-        curTile = self.tileset.tiles[index.row()]
-        palette = self.paletteWidget
+    def beginPaintStroke(self):
+        self._stroke = {}  # tile index -> its collision value before the stroke
 
-        i = palette.coreGrid.currentIndex()
-        curTile.coreType = i
+    def paintTile(self, row):
+        if not 0 <= row < len(self.tileset.tiles):
+            return
+        tile = self.tileset.tiles[row]
+        before = tile.getCollision()
+        if self._stroke is not None:
+            self._stroke.setdefault(row, before)
+        self.paletteWidget.applyTo(tile)
+        if tile.getCollision() != before:
+            self.setDirty()
+            self.tileDisplay.update(self.model.index(row, 0))
+        self.showTileInfo(row)
 
-        if palette.ParameterList[i] is not None:
-            curTile.params = palette.params1Grid.currentIndex()
-        else:
-            curTile.params = 0
+    def endPaintStroke(self):
+        if self._stroke:
+            changed = {row: value for row, value in self._stroke.items()
+                       if self.tileset.tiles[row].getCollision() != value}
+            if changed:
+                self._paintUndo = (self._paintUndo + [changed])[-100:]
+        self._stroke = None
 
-        if palette.ParameterList2[i] is not None:
-            curTile.params2 = palette.params2Grid.currentIndex()
-        else:
-            curTile.params2 = 0
-
-        solidity = palette.collisionGrid.currentIndex()
-        if solidity <= 4:
-            curTile.solidity = solidity
-            curTile.slide = 0
-        elif solidity <= 6:
-            curTile.solidity = solidity - 4
-            curTile.slide = 1
-        elif solidity <= 8:
-            curTile.solidity = solidity - 6
-            curTile.slide = 2
-
-        curTile.terrain = palette.terrainGrid.currentIndex()
-
-        self.updateInfo(0, 0)
+    def undoPaint(self):
+        """Undoes the last stroke of painted properties."""
+        if not self._paintUndo:
+            return
+        for row, value in self._paintUndo.pop().items():
+            self.tileset.tiles[row].setCollision(value)
         self.tileDisplay.update()
         self.setDirty()
+
+    def sideTabChanged(self, index):
+        """The Properties tab shows the tiles' collision while it's open, as it's what it changes."""
+        if index == 0:
+            self._collisionShownBefore = self.showCollisionBtn.isChecked()
+            self.showCollisionBtn.setChecked(True)
+        elif self._collisionShownBefore is not None:
+            self.showCollisionBtn.setChecked(self._collisionShownBefore)
+            self._collisionShownBefore = None
+
+    def pickProperties(self, idx):
+        """Picks a tile's properties in the Properties tab (to give them to other tiles)."""
+        self.paletteWidget.loadFrom(self.tileset.tiles[idx])
+        self.sideTabWidget.setCurrentIndex(0)
+        self.showTileInfo(idx)
 
     def updateCollisionOverlay(self, state):
         self.tileDisplay.showCollision = state
@@ -2104,6 +2322,9 @@ class PropertyIconGrid(QtWidgets.QWidget):
     def populate(self, items):
         for btn in list(self._group.buttons()):
             self._group.removeButton(btn)
+            # Gone now: a button waiting for deleteLater would still be drawn over the new ones
+            btn.hide()
+            btn.setParent(None)
             btn.deleteLater()
         while self._gridLayout.count():
             self._gridLayout.takeAt(0)
@@ -2142,6 +2363,11 @@ class PropertyIconGrid(QtWidgets.QWidget):
 
         if self._buttons:
             self._buttons[0].setChecked(True)
+
+        # The grid's size changed: let the panel make room for it (it was squashed to the
+        # size it had before, cutting off the buttons)
+        self._gridLayout.invalidate()
+        self.updateGeometry()
 
     def _onClicked(self, btn):
         self.currentIndexChanged.emit(self._group.id(btn))
@@ -2507,10 +2733,17 @@ class paletteWidget(QtWidgets.QWidget):
         mainLayout.setContentsMargins(4, 4, 4, 4)
 
         # Hint text
-        hintLabel = QtWidgets.QLabel('Click a tile in the canvas to apply your selected properties onto it')
+        hintLabel = QtWidgets.QLabel('Click a tile, or drag over tiles, to give them the properties picked '
+                                     'here; the collision is shown on the tiles. Alt + click (or middle-click) '
+                                     'a tile to pick its properties. Ctrl+Z undoes.')
         hintLabel.setWordWrap(True)
         hintLabel.setStyleSheet('color: #888; font-style: italic; font-size: 11px;')
         mainLayout.addWidget(hintLabel)
+
+        # What clicking a tile gives it
+        self.summaryLabel = QtWidgets.QLabel()
+        self.summaryLabel.setWordWrap(True)
+        mainLayout.addWidget(self.summaryLabel)
 
         # Core Type section
         coreGroup = QtWidgets.QGroupBox('Core Type')
@@ -2560,6 +2793,42 @@ class paletteWidget(QtWidgets.QWidget):
         outerLayout.addWidget(scroll)
 
         self.swapParams(0)
+        self.coreGrid.currentIndexChanged.connect(self.suggestCollision)
+        self.params1Grid.currentIndexChanged.connect(self.suggestCollision)
+        for grid in (self.coreGrid, self.params1Grid, self.params2Grid, self.collisionGrid, self.terrainGrid):
+            grid.currentIndexChanged.connect(self.updateSummary)
+        self.updateSummary()
+
+    def suggestCollision(self, *args):
+        """
+        Picks the collision some core types need to work (and to show right on the tiles),
+        when a core type or parameter is clicked: spikes and conveyor belts are Solid, the
+        other damage tiles (icicles, lava, poison...) and cave entrances have No Solidity,
+        and slopes and partial blocks need to be solid where they're walked on or hit.
+        """
+        core = self.coreGrid.currentIndex()
+        param = self.params1Grid.currentIndex()
+        solidity = self._COLLISIONS[self.collisionGrid.currentIndex()][0]
+        if core == 15:                                  # Damage Tile
+            self.collisionGrid.setCurrentIndex(1 if param in (3, 4, 5, 6) else 0)
+        elif core == 19:                                # Cave Entrance: walked through
+            self.collisionGrid.setCurrentIndex(0)
+        elif core == 17 and solidity == 0:              # Conveyor Belt: stood on
+            self.collisionGrid.setCurrentIndex(1)
+        elif core == 11 and solidity in (0, 3) or core == 12 and solidity in (0, 2) or core == 9 and solidity == 0:
+            self.collisionGrid.setCurrentIndex(1)       # Solid
+
+    def updateSummary(self, *args):
+        """Shows the picked properties in words."""
+        core = self.coreGrid.currentIndex()
+        text = self.coreTypes[core][0]
+        for items, grid in ((self.ParameterList[core], self.params1Grid),
+                            (self.ParameterList2[core], self.params2Grid)):
+            if items is not None and grid.currentIndex() < len(items):
+                text += ' (%s)' % items[grid.currentIndex()][0]
+        text += ' • %s • %s' % (self.collsTypes[self.collisionGrid.currentIndex()][0],
+                                self.terrainTypes[self.terrainGrid.currentIndex()][0])
+        self.summaryLabel.setText('<b>Painting:</b> ' + text)
 
     def swapParams(self, index=None):
         if index is None:
@@ -2580,6 +2849,32 @@ class paletteWidget(QtWidgets.QWidget):
             self.params2Group.setVisible(True)
         else:
             self.params2Group.setVisible(False)
+
+    # The Collision choices are a solidity, with sliding (5, 6) or staircase (7, 8) for some
+    _COLLISIONS = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (1, 1), (2, 1), (1, 2), (2, 2)]
+
+    def applyTo(self, tile):
+        """Gives a tile the properties picked here."""
+        core = self.coreGrid.currentIndex()
+        tile.coreType = core
+        tile.params = self.params1Grid.currentIndex() if self.ParameterList[core] is not None else 0
+        tile.params2 = self.params2Grid.currentIndex() if self.ParameterList2[core] is not None else 0
+        tile.solidity, tile.slide = self._COLLISIONS[self.collisionGrid.currentIndex()]
+        tile.terrain = self.terrainGrid.currentIndex()
+
+    def loadFrom(self, tile):
+        """Picks a tile's properties here (the closest choice, for values with none)."""
+        core = tile.coreType if tile.coreType < len(self.coreTypes) else 0
+        self.coreGrid.setCurrentIndex(core)
+        self.swapParams(core)
+        self.params1Grid.setCurrentIndex(tile.params)
+        self.params2Grid.setCurrentIndex(tile.params2)
+        collision = (tile.solidity, tile.slide)
+        if collision not in self._COLLISIONS:
+            collision = (tile.solidity, 0)
+        self.collisionGrid.setCurrentIndex(self._COLLISIONS.index(collision) if collision in self._COLLISIONS else 0)
+        self.terrainGrid.setCurrentIndex(tile.terrain if tile.terrain < len(self.terrainTypes) else 0)
+        self.updateSummary()
 
 
 
@@ -2782,9 +3077,45 @@ class displayWidget(QtWidgets.QListView):
         self.setItemDelegate(self.TileItemDelegate(self.editor))
 
 
+    def update(self, *args):
+        """update() with no arguments repaints the tiles too (they're drawn in the viewport)."""
+        if args:
+            return super().update(*args)
+        super().update()
+        self.viewport().update()
+
+    def _painting(self):
+        """True while the Properties tab is open: clicks then paint properties onto tiles."""
+        return self.editor is not None and self.editor.sideTabWidget.currentIndex() == 0
+
+    def mousePressEvent(self, event):
+        if not self._painting():
+            return super().mousePressEvent(event)
+        row = self.indexAt(event.pos()).row()
+        pick = event.button() == Qt.MidButton or (
+            event.button() == Qt.LeftButton and event.modifiers() & Qt.AltModifier)
+        if pick:
+            if row >= 0:
+                self.editor.pickProperties(row)
+        elif event.button() == Qt.LeftButton:
+            self.editor.beginPaintStroke()
+            self.editor.paintTile(row)
+        else:
+            super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.editor is not None and self.editor._stroke is not None and event.button() == Qt.LeftButton:
+            self.editor.endPaintStroke()
+            return
+        super().mouseReleaseEvent(event)
+
     def mouseMoveEvent(self, event):
         QtWidgets.QWidget.mouseMoveEvent(self, event)
 
+        # Dragging over tiles paints them all
+        if self.editor is not None and self.editor._stroke is not None and event.buttons() & Qt.LeftButton:
+            self.editor.paintTile(self.indexAt(event.pos()).row())
+            return
         self.mouseMoved.emit(event.x(), event.y())
 
     def contextMenuEvent(self, event):
@@ -2803,6 +3134,7 @@ class displayWidget(QtWidgets.QListView):
         menu.addAction("Import image...",  lambda: self._replaceImage(tileIdx))
         menu.addAction("Export image...",  lambda: self._saveImage(tileIdx))
         menu.addSeparator()
+        menu.addAction("Pick these properties", lambda: self.editor.pickProperties(tileIdx))
         menu.addAction("Copy properties to clipboard",   lambda: self._copyProperties(tileIdx))
         act = menu.addAction("Paste properties", lambda: self._pasteProperties(tileIdx))
         act.setEnabled(hasProps)
@@ -2942,7 +3274,14 @@ class displayWidget(QtWidgets.QListView):
             curTile = self.editor.tileset.tiles[index.row()]
 
             if self.editor.showCollisionBtn.isChecked():
-                updateCollisionOverlay(curTile, x, y, 24, painter)
+                # Dimmed a little, with bright outlined shapes, so the collision shows on
+                # light and dark tiles alike
+                painter.fillRect(option.rect, QtGui.QColor(0, 0, 0, 70))
+                painter.save()
+                updateCollisionOverlay(curTile, x, y, 24, painter,
+                                       defaultColor=QtGui.QColor(255, 120, 40, 150),
+                                       outline=QtGui.QColor(255, 255, 255, 200))
+                painter.restore()
 
 
             # Highlight stuff.
@@ -5160,6 +5499,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         fileMenu = menubar.addMenu("&File")
         fileMenu.addAction("Import Tileset from file...", self.openTilesetfromFile, QtGui.QKeySequence.Open)
+        fileMenu.addAction("Import Tileset from Objects...", self.importTilesetFromObjects)
         fileMenu.addAction("Export Tileset...", self.saveTilesetAs, QtGui.QKeySequence.SaveAs)
         fileMenu.addAction("Export All Tilesets...", self.exportAllTilesets)
         fileMenu.addSeparator()
@@ -5271,6 +5611,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def saveAllObjects(self): self.tabs.currentWidget().saveAllObjects()
     def clearObjects(self): self.tabs.currentWidget().clearObjects()
     def clearCollisions(self): self.tabs.currentWidget().clearCollisions()
+    def importTilesetFromObjects(self): self.tabs.currentWidget().importTilesetFromObjects()
 
     def importObjectsFromFolder(self):
         """Open the folder-import dialog and import selected objects into the chosen slot(s)."""
@@ -5346,6 +5687,118 @@ class MainWindow(QtWidgets.QMainWindow):
 ############################ Import Objects from Folder Dialog ##############################
 
 
+_OBJECT_FILES = ("colls", "meta", "objlyt", "img", "nml")
+
+
+def _naturalKey(s):
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)]
+
+
+def loadObjectFolder(dirPath):
+    """
+    The objects exported to a folder (by Export all objects: <name>.json, .png, _nml.png,
+    .colls, .meta and .objlyt each), in name order (object_2 before object_10), as
+    [(name, jsonData), ...]. Objects with a file missing are left out.
+    """
+    try:
+        files = sorted([f for f in os.listdir(dirPath) if f.lower().endswith('.json')], key=_naturalKey)
+    except OSError:
+        return []
+
+    objects = []
+    for filename in files:
+        try:
+            with open(os.path.join(dirPath, filename)) as f:
+                jsonData = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(jsonData, dict) or not all(k in jsonData for k in _OBJECT_FILES):
+            continue
+        if not all(os.path.isfile(os.path.join(dirPath, jsonData[k])) for k in _OBJECT_FILES):
+            continue
+        objects.append((os.path.splitext(filename)[0], jsonData))
+    return objects
+
+
+def _unpackCommands(path, dest):
+    """
+    Commands that can unpack a RAR (or 7z) file, in the order they're tried: bsdtar (built
+    into Windows 10 and later, and macOS), 7-Zip, unrar and unar.
+    """
+    commands = []
+    if sys.platform == 'win32':
+        windir = os.environ.get('SystemRoot', r'C:\Windows')
+        commands.append([os.path.join(windir, 'System32', 'tar.exe'), '-xf', path, '-C', dest])
+    elif sys.platform == 'darwin':
+        commands.append(['/usr/bin/tar', '-xf', path, '-C', dest])
+    if shutil.which('bsdtar'):
+        commands.append([shutil.which('bsdtar'), '-xf', path, '-C', dest])
+
+    sevenZip = [shutil.which(name) for name in ('7z', '7zz')]
+    if sys.platform == 'win32':
+        for folder in (os.environ.get('ProgramFiles'), os.environ.get('ProgramFiles(x86)')):
+            if folder:
+                sevenZip.append(os.path.join(folder, '7-Zip', '7z.exe'))
+    commands += [[exe, 'x', '-y', '-o' + dest, path] for exe in sevenZip if exe and os.path.isfile(exe)]
+
+    unrar = [shutil.which('unrar')]
+    if sys.platform == 'win32':
+        for folder in (os.environ.get('ProgramFiles'), os.environ.get('ProgramFiles(x86)')):
+            if folder:
+                unrar.append(os.path.join(folder, 'WinRAR', 'UnRAR.exe'))
+    commands += [[exe, 'x', '-y', '-o+', path, dest + os.sep] for exe in unrar if exe and os.path.isfile(exe)]
+
+    if shutil.which('unar'):
+        commands.append([shutil.which('unar'), '-q', '-f', '-o', dest, path])
+    return [c for c in commands if os.path.isfile(c[0])]
+
+
+def extractArchive(path, dest):
+    """
+    Unpacks a ZIP file (with Python) or a RAR or 7z file (with a program for it, see
+    _unpackCommands) into dest. Returns None, or what went wrong.
+    """
+    if zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                archive.extractall(dest)  # names with ".." or drive letters are made safe
+            return None
+        except (OSError, zipfile.BadZipFile) as exc:
+            return "The ZIP file could not be read (%s)." % exc
+
+    commands = _unpackCommands(path, dest)
+    if not commands:
+        return ("No program that can unpack this file was found. Install 7-Zip "
+                "(or WinRAR, unrar or unar) and try again.")
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    for command in commands:
+        try:
+            result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=300, creationflags=flags)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and os.listdir(dest):
+            return None
+        # A failed attempt may leave half the files: clear them for the next program
+        for name in os.listdir(dest):
+            target = os.path.join(dest, name)
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                os.remove(target)
+    return "The file could not be unpacked. It may be damaged, password-protected or not an archive."
+
+
+def findObjectFolder(root):
+    """root, or else the first folder inside it, with exported objects in it; None if there's none."""
+    for dirPath, dirNames, _ in os.walk(root):
+        dirNames[:] = sorted((d for d in dirNames if d != '__MACOSX'), key=_naturalKey)
+        if loadObjectFolder(dirPath):
+            return dirPath
+    return None
+
+
+
 class ImportObjectsDialog(QtWidgets.QDialog):
     """Dialog for importing objects from a collection folder into tileset slots 2–4."""
 
@@ -5414,10 +5867,6 @@ class ImportObjectsDialog(QtWidgets.QDialog):
 
     # ── Data loading ─────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _naturalKey(s):
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)]
-
     def _loadFolders(self):
         self.folderCombo.blockSignals(True)
         self.folderCombo.clear()
@@ -5428,7 +5877,7 @@ class ImportObjectsDialog(QtWidgets.QDialog):
             return
         folders = sorted(
             [f for f in os.listdir(top) if os.path.isdir(os.path.join(top, f))],
-            key=self._naturalKey)
+            key=_naturalKey)
         for f in folders:
             self.folderCombo.addItem(f)
         self.folderCombo.blockSignals(False)
@@ -5445,28 +5894,7 @@ class ImportObjectsDialog(QtWidgets.QDialog):
             return
 
         dirPath = os.path.join(top, folder)
-        try:
-            files = sorted(
-                [f for f in os.listdir(dirPath) if f.endswith('.json')],
-                key=self._naturalKey)
-        except OSError:
-            self._updateOkButton()
-            return
-
-        for filename in files:
-            filepath = os.path.join(dirPath, filename)
-            try:
-                with open(filepath) as f:
-                    jsonData = json.load(f)
-            except Exception:
-                continue
-
-            required = ("colls", "meta", "objlyt", "img", "nml")
-            if not all(k in jsonData for k in required):
-                continue
-            if not all(os.path.isfile(os.path.join(dirPath, jsonData[k])) for k in required):
-                continue
-
+        for label, jsonData in loadObjectFolder(dirPath):
             # Preview: use the full image sheet, scaled to fit a 64×64 icon
             imgPath = os.path.join(dirPath, jsonData["img"])
             src = QtGui.QPixmap(imgPath)
@@ -5476,7 +5904,6 @@ class ImportObjectsDialog(QtWidgets.QDialog):
             else:
                 icon = QtGui.QIcon()
 
-            label = os.path.splitext(filename)[0]
             item = QtGui.QStandardItem(icon, label)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setToolTip(label)

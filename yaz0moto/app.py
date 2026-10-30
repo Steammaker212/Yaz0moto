@@ -1334,7 +1334,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         tabs.setTabBar(IconsOnlyTabBar())
         tabs.setIconSize(QtCore.QSize(20, 20))
         tabs.currentChanged.connect(self.CreationTabChanged)
-        dock.setWidget(tabs)
+        # In a scroll area so the bottom of the palette can always be reached, even when
+        # other docks stacked with it leave it less height than its contents need
+        tabsScroll = QtWidgets.QScrollArea()
+        tabsScroll.setWidgetResizable(True)
+        tabsScroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        tabsScroll.setWidget(tabs)
+        dock.setWidget(tabsScroll)
         self.creationTabs = tabs
 
         # object choosing tabs

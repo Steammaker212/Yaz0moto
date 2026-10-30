@@ -25,6 +25,7 @@ bc3
 /Yaz0moto.egg-info
 .DS_Store
 yaz0moto.sh
+yaz0moto.bat
 
 # Everything else in tools/ is shipped and must stay tracked. Older versions ran
 # nvcompress inside tools/<platform>/ and left these behind; it now uses a temp folder.

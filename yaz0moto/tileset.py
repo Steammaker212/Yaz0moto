@@ -196,10 +196,14 @@ class TilesetTile:
         self.setCollisions(0x100000006)
 
 
-def updateCollisionOverlay(tile, x, y, tileWidth, painter):
+def updateCollisionOverlay(tile, x, y, tileWidth, painter, defaultColor=None, outline=None):
         """
-        Updates the collisions overlay for this pixmap
+        Updates the collisions overlay for this pixmap. defaultColor replaces the
+        translucent black of tiles with no special terrain, and outline draws the shapes'
+        edges in that colour (the tileset editor uses both so they show on dark tiles).
         """
+        if outline is not None:
+            painter.setPen(QtGui.QPen(outline, 1))
         # Sets the colour based on terrain type
         if tile.coreType == 15 and (tile.solidity == 1 and tile.params in (3, 4, 5, 6) or tile.solidity == 0 and tile.params in (0, 1, 2, 7, 8, 9)):
             if tile.params == 7:
@@ -233,7 +237,7 @@ def updateCollisionOverlay(tile, x, y, tileWidth, painter):
         elif tile.terrain == 12:  # Beanstalk Leaf
             color = QtGui.QColor(96, 208, 0, 120)
         else:
-            color = QtGui.QColor(0, 0, 0, 120)
+            color = QtGui.QColor(defaultColor) if defaultColor is not None else QtGui.QColor(0, 0, 0, 120)
 
         # Sets Brush style for fills
         if tile.coreType in (14, 20, 22) and tile.solidity == 0 or tile.coreType == 21 and tile.solidity == 1:  # Climbing Grid
@@ -599,6 +603,29 @@ def updateCollisionOverlay(tile, x, y, tileWidth, painter):
 
         elif tile.solidity == 1 or tile.coreType in (14, 20, 22) and tile.solidity == 0:  # Solid or Climbable
             painter.drawRect(x, y, tileWidth, tileWidth)
+
+        # Tiles that go one way get an arrow that way, over their collision
+        if tile.coreType == 19 and tile.params in (0, 1):  # Cave entrance: left, right
+            _drawArrow(painter, x, y, tileWidth, tile.params == 0, QtGui.QColor(190, 110, 255, 230))
+        elif tile.coreType == 17 and tile.params in (0, 1, 2, 3):  # Conveyor: left, right, left fast, right fast
+            left = tile.params in (0, 2)
+            if tile.params >= 2:
+                _drawArrow(painter, x - tileWidth * 0.15, y, tileWidth, left, QtGui.QColor(255, 230, 60, 230))
+                _drawArrow(painter, x + tileWidth * 0.15, y, tileWidth, left, QtGui.QColor(255, 230, 60, 230))
+            else:
+                _drawArrow(painter, x, y, tileWidth, left, QtGui.QColor(255, 230, 60, 230))
+
+
+def _drawArrow(painter, x, y, tileWidth, left, color):
+    """A horizontal arrow across a tile, pointing left or right."""
+    points = [(0.15, 0.4), (0.5, 0.4), (0.5, 0.2), (0.85, 0.5), (0.5, 0.8), (0.5, 0.6), (0.15, 0.6)]
+    if left:
+        points = [(1 - px, py) for px, py in points]
+    painter.save()
+    painter.setBrush(QtGui.QBrush(color))
+    painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 160), 1))
+    painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(x + px * tileWidth, y + py * tileWidth) for px, py in points]))
+    painter.restore()
 
 
 class ObjectDef:
@@ -1466,6 +1493,9 @@ def BuildTilesetArchiveDX(name, tiledata, nmldata, colldata, deffile, indexfile,
     """
     template = globals.gamedef.file('tilesettemplate')
     if not template or not os.path.isfile(template):
+        # The template is the same for every Deluxe game/mod: fall back to the bundled one
+        template = os.path.join(globals.miyamoto_path, 'yaz0data', 'games', 'NSMBUDX', 'output.bfres')
+    if not os.path.isfile(template):
         raise ValueError('The Deluxe tileset template (output.bfres) is missing from the Yaz0moto data files.')
 
     arc = SarcLib.SARC_Archive(endianness='<')

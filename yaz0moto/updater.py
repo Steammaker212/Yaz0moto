@@ -385,7 +385,9 @@ def _prepare_update(release, progress=None):
     if asset is None:
         raise UpdateError('This release has no update package for the current platform.')
 
-    work = Path(tempfile.mkdtemp(prefix='yaz0moto-update-'))
+    # Staged next to the installation, not in the temp folder: the helper renames the new
+    # folder into place, which can't be done across drives (Yaz0moto on D:, %TEMP% on C:)
+    work = Path(tempfile.mkdtemp(prefix='.yaz0moto-update-', dir=str(location.target.parent)))
     download = work / asset['name']
     try:
         _download_asset(asset, download, progress)
@@ -407,6 +409,10 @@ def _prepare_update(release, progress=None):
             else:
                 staged = extracted
                 expected_name = 'Yaz0moto.exe' if sys.platform == 'win32' else 'Yaz0moto'
+                # The files may be in a folder of their own inside the ZIP
+                folders = [child for child in staged.iterdir() if child.is_dir()]
+                if not (staged / expected_name).exists() and len(folders) == 1:
+                    staged = folders[0]
                 if not (staged / expected_name).is_file():
                     raise UpdateError(f'Update does not contain {expected_name}.')
         return location, staged, work
@@ -419,7 +425,18 @@ def _ps_quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _error_file(location):
+    """Where the install helper writes why an update failed, shown at the next start."""
+    return location.target.parent / 'Yaz0moto-update-error.txt'
+
+
 def _write_windows_helper(location, staged, work):
+    """
+    Waits for Yaz0moto to exit, then swaps the installation folder for the new one (or, if
+    the folder can't be renamed, e.g. it's open in Explorer or a terminal, copies the new
+    files over it) and starts Yaz0moto again. If that fails, the old version is started
+    and the error is written to _error_file.
+    """
     script = work / 'install-update.ps1'
     backup = location.target.with_name(location.target.name + '.update-backup')
     new_executable = location.target / location.executable.name
@@ -427,22 +444,44 @@ def _write_windows_helper(location, staged, work):
 $target = {_ps_quote(location.target)}
 $staged = {_ps_quote(staged)}
 $backup = {_ps_quote(backup)}
+$work = {_ps_quote(work)}
 $executable = {_ps_quote(new_executable)}
-Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue
+$errorFile = {_ps_quote(_error_file(location))}
+Set-Location -LiteralPath (Split-Path -Parent $target)
+
+# Files can stay locked for a moment after Yaz0moto exits (antivirus scans, the indexer)
+function Retry([scriptblock]$action) {{
+    for ($i = 0; $i -lt 20; $i++) {{
+        try {{ & $action; return }} catch {{ $last = $_; Start-Sleep -Milliseconds 500 }}
+    }}
+    throw $last
+}}
+
+Wait-Process -Id {os.getpid()} -Timeout 60 -ErrorAction SilentlyContinue
+Stop-Process -Id {os.getpid()} -Force -ErrorAction SilentlyContinue
 try {{
-    if (Test-Path $backup) {{ Remove-Item -Recurse -Force $backup }}
-    Move-Item -LiteralPath $target -Destination $backup
-    try {{
-        Move-Item -LiteralPath $staged -Destination $target
-    }} catch {{
-        Move-Item -LiteralPath $backup -Destination $target
-        throw
+    if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Recurse -Force }}
+    $swapped = $false
+    $movedOut = $false
+    try {{ Retry {{ Move-Item -LiteralPath $target -Destination $backup }}; $movedOut = $true }} catch {{ }}
+    if ($movedOut) {{
+        try {{
+            Retry {{ Move-Item -LiteralPath $staged -Destination $target }}
+            $swapped = $true
+        }} catch {{
+            Move-Item -LiteralPath $backup -Destination $target  # put the old version back
+        }}
+    }}
+    if (-not $swapped) {{
+        & robocopy.exe $staged $target /E /R:10 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) {{ throw "Could not copy the new files into $target (robocopy error $LASTEXITCODE)." }}
     }}
     Start-Process -FilePath $executable -WorkingDirectory $target
-    Remove-Item -Recurse -Force $backup
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue {_ps_quote(work)}
+    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }} catch {{
-    $_ | Out-String | Set-Content -Path (Join-Path {_ps_quote(work)} 'update-error.txt')
+    $_ | Out-String | Set-Content -LiteralPath $errorFile
+    if (Test-Path -LiteralPath $executable) {{ Start-Process -FilePath $executable -WorkingDirectory $target }}
 }}
 """
     script.write_text(content, encoding='utf-8')
@@ -472,6 +511,8 @@ if mv {target} {backup_path}; then
     fi
     mv {backup_path} {target}
 fi
+echo {shlex.quote(f'Could not replace {location.target} with the new version.')} >{shlex.quote(str(_error_file(location)))}
+({launch} >/dev/null 2>&1 &)
 exit 1
 """
     script.write_text(content, encoding='utf-8')
@@ -483,12 +524,14 @@ def _launch_helper(location, staged, work):
     if sys.platform == 'win32':
         script = _write_windows_helper(location, staged, work)
         flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'DETACHED_PROCESS', 0)
-        subprocess.Popen(
-            ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)],
-            creationflags=flags,
-            close_fds=True,
-            cwd=str(work),
-        )
+        command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)]
+        # Out of Yaz0moto's job (if a launcher put it in one), so the helper isn't killed when
+        # Yaz0moto exits; a job that doesn't allow that refuses, then it's started as before
+        try:
+            subprocess.Popen(command, creationflags=flags | 0x01000000,  # CREATE_BREAKAWAY_FROM_JOB
+                             close_fds=True, cwd=str(location.target.parent))
+        except OSError:
+            subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=str(location.target.parent))
     else:
         script = _write_posix_helper(location, staged, work)
         subprocess.Popen(
@@ -497,7 +540,7 @@ def _launch_helper(location, staged, work):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
-            cwd=str(work),
+            cwd=str(location.target.parent),
         )
 
 
@@ -613,6 +656,7 @@ _restore_unsaved_state = False
 
 
 def check_for_updates():
+    _report_failed_install()
     channel = _current_channel()
     if channel != CHANNEL_OFF:
         _start_check(channel, manual=False)
@@ -742,6 +786,31 @@ def _install_ready(location, staged, work):
         _show_error(f'Could not start the update installer: {exc}')
     else:
         _clear_dirty_restore()
+        # The installer waits for Yaz0moto to exit, so make sure it does (the window is
+        # closed and the level saved by now), even if something keeps it running
+        QtWidgets.QApplication.quit()
+        timer = threading.Timer(15, os._exit, (0,))
+        timer.daemon = True
+        timer.start()
+
+
+def _report_failed_install():
+    """Shows why the last update couldn't be installed (see _error_file), once."""
+    try:
+        location = _install_location()
+    except UpdateError:
+        return
+    if location is None:
+        return
+    path = _error_file(location)
+    if not path.is_file():
+        return
+    try:
+        details = path.read_text(encoding='utf-8', errors='replace').strip()
+        path.unlink()
+    except OSError:
+        return
+    _show_error('The last update could not be installed, so this version was kept.\n\n' + details[:1500])
 
 
 def _restore_dirty_state():

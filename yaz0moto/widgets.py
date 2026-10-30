@@ -4945,6 +4945,11 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         self.XScrollBar = QtWidgets.QScrollBar(Qt.Horizontal, parent)
         self.setVerticalScrollBar(self.YScrollBar)
         self.setHorizontalScrollBar(self.XScrollBar)
+        # Always visible (with a visible track, see style.qss) so the level can be scrolled with them
+        self.YScrollBar.setObjectName('levelViewScrollBar')
+        self.XScrollBar.setObjectName('levelViewScrollBar')
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         self.currentobj = None
         self.selectionFix = False  # Fixes Qt selection bug

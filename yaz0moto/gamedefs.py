@@ -394,15 +394,15 @@ class MiyamotoGameDefinition:
 
     def file(self, name):
         """
-        Returns a file by recursively checking successive gamedef bases
+        Returns a file by recursively checking successive gamedef bases. A file this
+        definition doesn't list at all (e.g. a mod built on Deluxe that doesn't redeclare
+        the Deluxe-only "tilesettemplate") is looked up in the bases too.
         """
-        if name not in self.files: return
-
-        if self.files[name].path is not None:
+        if name in self.files and self.files[name].path is not None:
             return self.files[name].path
-        else:
-            if self.base is None: return
-            return self.base.file(name)  # it can recursively check its base, too
+
+        if self.base is None: return
+        return self.base.file(name)  # it can recursively check its base, too
 
     def getImageClasses(self):
         """

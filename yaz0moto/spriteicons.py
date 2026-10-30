@@ -19,6 +19,17 @@ icons/59_0000-0000-0000-1000-0005-0000.png. When both the ID and the raw data ma
 drawn instead of the actor's sprite image (or instead of <actor id>.png, for an actor with
 no sprite image). <actor id>.png alone only replaces the ID box of actors with no image.
 
+Icons can also be named Y0MI_XXXXXX.png or Y0MI_XXXXXX_<raw data>.png (YOMI_ works too), with
+XXXXXX six hex digits holding these bits (big endian): WWWWHHHH ABCDEEEE EEEEEEEE
+  WWWW, HHHH   the size in tiles the image is stretched to, minus 1 (0 = 1 tile ... F = 16)
+  A            drawn upwards from the actor's tile (otherwise downwards)
+  B            drawn to the right of the actor's tile (otherwise to its left)
+  C            centred vertically on the actor's tile (A is ignored)
+  D            centred horizontally on the actor's tile (B is ignored)
+  EEEEEEEEEEEE the actor ID
+They work like the names above (with raw data: only for that setting of the actor, and
+before an icon for just the ID); a name not starting with Y0MI_ is read as above.
+
 Rendering loads images, so call these outside paint events (the grids queue them).
 """
 
@@ -115,7 +126,23 @@ def _isBlank(image):
 
 # "<id>-<raw data>": the raw data as groups of 4 hex digits, joined by - or _ (or not at all)
 _RAW_NAME = re.compile(r'(?P<id>.+?)[-_](?P<raw>[0-9A-Fa-f]{4}(?:[-_]?[0-9A-Fa-f]{4})+)')
-_index = None  # (folders, [(folder's {id: path}, folder's {(id, raw data): path})]), most specific patch first
+# "Y0MI_<layout and ID>[_<raw data>]", see the module notes
+_Y0MI_NAME = re.compile(r'Y[0O]MI_(?P<code>[0-9A-F]{6})(?:[-_](?P<raw>[0-9A-F]{4}(?:[-_]?[0-9A-F]{4})+))?',
+                        re.IGNORECASE)
+# (folders, [(folder's {id: path}, folder's {(id, raw data): path})]), most specific patch first.
+# The ids are strings; Y0MI_ icons are under the actor's int ID, with their layout:
+# path is then (path, (columns, rows, (up, right, centreV, centreH))).
+_index = None
+
+
+def _y0miLayout(code):
+    """(actor ID, (columns, rows, (up, right, centreV, centreH))) from a Y0MI_ name's 6 hex digits."""
+    value = int(code, 16)
+    cols = (value >> 20 & 0xF) + 1
+    rows = (value >> 16 & 0xF) + 1
+    flags = value >> 12 & 0xF
+    anchor = (bool(flags & 8), bool(flags & 4), bool(flags & 2), bool(flags & 1))
+    return value & 0xFFF, (cols, rows, anchor)
 
 
 def rawDataName(data):
@@ -141,6 +168,15 @@ def _iconIndex():
                 if ext.lower() != '.png':
                     continue
                 path = os.path.join(folder, name)
+                match = _Y0MI_NAME.fullmatch(stem)
+                if match:
+                    type_id, layout = _y0miLayout(match.group('code'))
+                    if match.group('raw'):
+                        raw = re.sub(r'[-_]', '', match.group('raw'))
+                        exact[(type_id, bytes.fromhex(raw))] = (path, layout)
+                    else:
+                        plain[type_id] = (path, layout)
+                    continue
                 plain[stem] = path
                 match = _RAW_NAME.fullmatch(stem)
                 if match:
@@ -150,24 +186,37 @@ def _iconIndex():
     return _index[1]
 
 
-def iconPath(type_id, data=None, exactOnly=False):
+def _iconEntry(type_id, data=None, exactOnly=False):
     """
-    The patch icon file for an actor: one named after its ID and this raw data if there's
-    one (in any patch), otherwise (unless exactOnly) the one named after its ID; None if
-    there isn't one.
+    (path, Y0MI_ layout or None) of the patch icon for an actor: one named after its ID and
+    this raw data if there's one (in any patch), otherwise (unless exactOnly) the one named
+    after its ID; Y0MI_ names first. (None, None) if there isn't one.
     """
+    keys = [str(type_id)]
+    if isinstance(type_id, int):
+        keys.insert(0, type_id)  # the Y0MI_ icons
+
+    def found(entry):
+        return entry if isinstance(entry, tuple) else (entry, None)
+
     index = _iconIndex()
     if data is not None:
-        key = (str(type_id), bytes(data))
+        data = bytes(data)
         for plain, exact in index:
-            if key in exact:
-                return exact[key]
-    if exactOnly:
-        return None
-    for plain, exact in index:
-        if str(type_id) in plain:
-            return plain[str(type_id)]
-    return None
+            for key in keys:
+                if (key, data) in exact:
+                    return found(exact[(key, data)])
+    if not exactOnly:
+        for plain, exact in index:
+            for key in keys:
+                if key in plain:
+                    return found(plain[key])
+    return None, None
+
+
+def iconPath(type_id, data=None, exactOnly=False):
+    """The patch icon file for an actor (see _iconEntry), or None if there isn't one."""
+    return _iconEntry(type_id, data, exactOnly)[0]
 
 
 def _pngIcon(type_id, size, data=None):
@@ -258,15 +307,26 @@ def tileSpan(width, height):
     return span
 
 
-def levelIconSpan(type_id, data=None, exactOnly=False):
-    """The tiles (columns, rows) the level icon covers, from the PNG's own size (see tileSpan)."""
-    path = iconPath(type_id, data, exactOnly)
+def levelIconLayout(type_id, data=None, exactOnly=False):
+    """
+    (columns, rows, anchor): the tiles the level icon covers, and for a Y0MI_ icon how it's
+    placed around the actor's tile, (up, right, centreV, centreH); anchor is None for other
+    icons, which cover tiles from the PNG's own size (see tileSpan), up from the actor's tile.
+    """
+    path, layout = _iconEntry(type_id, data, exactOnly)
+    if layout is not None:
+        return layout
     if path is None:
-        return (1, 1)
+        return (1, 1, None)
     if path not in _spanCache:
         size = QtGui.QImageReader(path).size()
         _spanCache[path] = tileSpan(size.width(), size.height())
-    return _spanCache[path]
+    return _spanCache[path] + (None,)
+
+
+def levelIconSpan(type_id, data=None, exactOnly=False):
+    """The tiles (columns, rows) the level icon covers (see levelIconLayout)."""
+    return levelIconLayout(type_id, data, exactOnly)[:2]
 
 
 def levelIcon(type_id, size, data=None, exactOnly=False, tiled=False):
@@ -274,9 +334,10 @@ def levelIcon(type_id, size, data=None, exactOnly=False, tiled=False):
     The patch's icon for an actor drawn in the level ("<id>-<raw data>.png" for this data,
     or, unless exactOnly, "<id>.png"), or None if there isn't one (the box or sprite image
     stays then, rather than the Bowser picture). size is per tile when tiled (the icon then
-    fits the tiles levelIconSpan gives), otherwise the whole icon fits size x size.
+    fits the tiles levelIconLayout gives; a Y0MI_ icon is stretched to fill them), otherwise
+    the whole icon fits size x size.
     """
-    path = iconPath(type_id, data, exactOnly)
+    path, layout = _iconEntry(type_id, data, exactOnly)
     if path is None:
         return None
     key = (path, size, tiled)
@@ -285,8 +346,9 @@ def levelIcon(type_id, size, data=None, exactOnly=False, tiled=False):
         if pix.isNull():
             _levelCache[key] = None
         else:
-            cols, rows = levelIconSpan(type_id, data, exactOnly) if tiled else (1, 1)
-            _levelCache[key] = pix.scaled(size * cols, size * rows, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            cols, rows, _ = levelIconLayout(type_id, data, exactOnly) if tiled else (1, 1, None)
+            mode = Qt.IgnoreAspectRatio if tiled and layout is not None else Qt.KeepAspectRatio
+            _levelCache[key] = pix.scaled(size * cols, size * rows, mode, Qt.SmoothTransformation)
     return _levelCache[key]
 
 

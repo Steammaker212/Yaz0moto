@@ -543,6 +543,21 @@ QScrollBar::add-page, QScrollBar::sub-page {
     background: none;
 }
 
+/* The level view's scroll bars sit over the level, so give them a visible track */
+QScrollBar#levelViewScrollBar {
+    background: ${panel};
+    margin: 0;
+}
+
+QScrollBar#levelViewScrollBar::handle {
+    background: ${muted};
+    margin: 2px;
+}
+
+QScrollBar#levelViewScrollBar::handle:hover {
+    background: ${accent};
+}
+
 /* ---------------------------------------------------------------- sliders and progress */
 
 QSlider::groove:horizontal {

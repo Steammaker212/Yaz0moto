@@ -651,6 +651,10 @@ def _LoadTileset(idx, name):
     indexfile = sarc['BG_unt/%s_hd.bin' % name].data
     deffile = sarc['BG_unt/%s.bin' % name].data
     objcount = len(indexfile) // 6
+    if objcount > len(defs):
+        # Levels store an object's number in a byte, so they can't use any more
+        print('Tileset %s has %d objects; only the first %d can be used.' % (name, objcount, len(defs)))
+        objcount = len(defs)
     indexstruct = struct.Struct(indexFormat)
 
     for i in range(objcount):

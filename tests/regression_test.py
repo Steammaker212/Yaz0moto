@@ -362,8 +362,8 @@ check('a 3:1 level icon spans 3 tiles and is loaded at that size',
 from yaz0moto.items import SpriteItem
 tw = globals.TileWidth
 box = types.SimpleNamespace(BoundingRect=QtCore.QRectF(0, 0, tw, tw))
-def placed(span, replaces=False, offset=(0, 0)):
-    fake = types.SimpleNamespace(iconSpan=span, iconReplacesImage=replaces,
+def placed(span, replaces=False, offset=(0, 0), anchor=None):
+    fake = types.SimpleNamespace(iconSpan=span, iconReplacesImage=replaces, iconAnchor=anchor,
                                  ImageObj=types.SimpleNamespace(spritebox=box, xOffset=offset[0], yOffset=offset[1]))
     return SpriteItem.iconRect(fake)
 check('an icon over 900px on a side covers twice the tiles each way',
@@ -376,6 +376,28 @@ check('a wide icon is centred on the actor\'s tile', placed((3, 1)) == QtCore.QR
 check('a tall icon goes up from the actor\'s tile', placed((1, 4)) == QtCore.QRectF(0, -3 * tw, tw, 4 * tw))
 check('an icon replacing a sprite image sits on the actor\'s tile, not the image\'s corner',
       placed((1, 2), True, (-8, -16)) == QtCore.QRectF(tw / 2, 0, tw, 2 * tw))
+
+# Y0MI_<WWWWHHHH ABCDEEEE EEEEEEEE>[_<raw data>].png
+check('a Y0MI_ name holds the size in tiles, the placement and the actor ID',
+      spriteicons._y0miLayout('12905B') == (0x5B, (2, 3, (True, False, False, True)))
+      and spriteicons._y0miLayout('F0000A') == (10, (16, 1, (False, False, False, False))))
+check('a Y0MI_ icon goes up or down, right or left of the actor\'s tile',
+      placed((2, 3), anchor=(True, True, False, False)) == QtCore.QRectF(0, -2 * tw, 2 * tw, 3 * tw)
+      and placed((2, 3), anchor=(False, False, False, False)) == QtCore.QRectF(-tw, 0, 2 * tw, 3 * tw))
+check('a centred Y0MI_ icon is centred on the actor\'s tile, by half tiles if need be',
+      placed((2, 3), anchor=(True, True, True, True)) == QtCore.QRectF(-tw / 2, -tw, 2 * tw, 3 * tw))
+square = QtGui.QPixmap(20, 20)
+square.fill(QtGui.QColor('#FF00FF'))
+square.save(os.path.join(patch, 'icons', 'Y0MI_216006.png'))  # 3 x 2 tiles, to the right, centred vertically, actor 6
+cyan = QtGui.QPixmap(20, 20)
+cyan.fill(QtGui.QColor('#00FFFF'))
+cyan.save(os.path.join(patch, 'icons', 'yomi_000006_%s.png' % spriteicons.rawDataName(data7)))
+spriteicons.clearCache()
+check('a Y0MI_ icon comes before the old name for the same actor, and is stretched to its tiles',
+      spriteicons.levelIconLayout(6) == (3, 2, (False, True, True, False))
+      and spriteicons.levelIcon(6, 40, tiled=True).size() == QtCore.QSize(120, 80) and levelColor(6, None) == '#ff00ff')
+check('a Y0MI_ icon with raw data is used for that data first (YOMI_ works too)',
+      levelColor(6, data7) == '#00ffff' and spriteicons.levelIconLayout(6, data7)[:2] == (1, 1))
 check('the palette keeps the <id>.png icon',QtGui.QColor(spriteicons.spriteIcon(7, 48).toImage().pixel(24, 24)).name() == '#ff0000')
 
 # ---------------------------------------------------------------- parts bar
