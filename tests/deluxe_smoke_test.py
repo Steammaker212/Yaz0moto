@@ -12,7 +12,7 @@ Run from anywhere:   python tests/deluxe_smoke_test.py
 Needs PyQt5 and the compiled/pyximport extensions Pyamoto already requires.
 """
 import faulthandler; faulthandler.dump_traceback_later(280, exit=True)
-import sys, os, struct, subprocess, tempfile, random, shutil
+import sys, os, json, struct, subprocess, tempfile, random, shutil
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -375,8 +375,11 @@ if os.path.isfile(_wiiu):
     check('Import Tileset from Objects reads a folder of objects', shapes(target) == shapes(real))
     flatzip = os.path.join(tmp, 'flat.zip')
     with zipfile.ZipFile(flatzip, 'w') as z:
-        for f in os.listdir(objdir)[:12]:
-            z.write(os.path.join(objdir, f), f)
+        for n in (0, 1):                                  # two whole objects (listdir's order varies)
+            base = 'tileset_0_object_%d' % n
+            jsonData = json.load(open(os.path.join(objdir, base + '.json')))
+            for f in [base + '.json'] + [jsonData[k] for k in ('colls', 'meta', 'objlyt', 'img', 'nml')]:
+                z.write(os.path.join(objdir, f), f)
     # RAR and 7z files are unpacked by another program (no RAR can be made here, but 7-Zip
     # can make a 7z, which goes the same way)
     sevenZip = [c[0] for c in puzzle._unpackCommands('x', tmp) if '7z' in os.path.basename(c[0]).lower()]
