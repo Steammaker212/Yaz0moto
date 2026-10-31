@@ -2102,6 +2102,12 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         subLayout.addWidget(self.noteBox)
         subLayout.addLayout(editboxlayout)
 
+        self.customIconButton = QtWidgets.QPushButton(GetIcon('sprites'), 'Set/Modify Custom Icon...')
+        self.customIconButton.setFocusPolicy(Qt.ClickFocus)
+        self.customIconButton.clicked.connect(globals.mainWindow.ShowCustomIconDialog)
+        self.customIconButton.setVisible(False)
+        subLayout.addWidget(self.customIconButton)
+
         self.setLayout(mainLayout)
 
         self.activeLayer = QtWidgets.QComboBox()
@@ -2997,6 +3003,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self._mixedTypeMode = False
         self._multiItems = list(items)
         self._setPreviewControlsVisible(False)
+        self.customIconButton.setVisible(False)
 
         merged, diff = self._computeMergedData([it.spritedata for it in items])
         self.data = merged
@@ -3048,6 +3055,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.noteButton.setVisible(False)
         self.relatedObjFilesButton.setVisible(False)
         self._setPreviewControlsVisible(False)
+        self.customIconButton.setVisible(False)
 
         merged, _ = self._computeMergedData([it.spritedata for it in items])
         self.data = merged
@@ -3069,6 +3077,7 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.initialState.setSpecialValueText('')
         self.initialState.blockSignals(False)
         self._setPreviewControlsVisible(movementpreview.has_movement_field(type))
+        self._updateCustomIconButton(type)
 
         if (self.spritetype == type) and not reset: return
 
@@ -3606,6 +3615,20 @@ class SpriteEditorWidget(QtWidgets.QWidget):
         self.previewMovementButton.setVisible(visible)
         self.previewSpeedBox.setVisible(visible)
         self.previewOptionsButton.setVisible(visible)
+
+    def _updateCustomIconButton(self, type):
+        """Shown for one actor in the level; greyed out if it can't have a Y0MI_ icon."""
+        from . import spriteicons
+        hasMod, fits = bool(spriteicons.iconFolders()), spriteicons.fitsY0MI(type)
+        if not hasMod:
+            tip = 'Enable a mod first: custom icons are saved in a mod patch.'
+        elif not fits:
+            tip = 'Y0MI_ icon names only hold actor IDs up to 4095, so this actor can\'t have one.'
+        else:
+            tip = 'Save a custom icon for this actor in an enabled mod patch.'
+        self.customIconButton.setToolTip(tip)
+        self.customIconButton.setEnabled(hasMod and fits)
+        self.customIconButton.setVisible(not self.DefaultMode)
 
     def ShowRelatedObjFilesTooltip(self):
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), self.relatedObjFiles, self)

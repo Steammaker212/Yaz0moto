@@ -296,18 +296,47 @@ class MiyamotoGameDefinition:
             name = 'LastLevel_' + self.name
             setSetting(name, path)
 
-    def patchFolders(self):
+    def patches(self):
         """
-        The folders of the patches (mods) this game is made of, most specific first:
-        <patches folder>/<patch name>
+        (name, folder) of the patches (mods) this game is made of, most specific first.
+        The folders are <patches folder>/<patch name>
         """
-        folders = []
+        patches = []
         gamedef = self
         while gamedef is not None:
             if gamedef.custom and gamedef.source == 'mod' and gamedef.gamepath:
-                folders.append(os.path.join(_mod_root(gamedef.gamepath), gamedef.gamepath))
+                patches.append((gamedef.name, os.path.join(_mod_root(gamedef.gamepath), gamedef.gamepath)))
             gamedef = gamedef.base
-        return folders
+        return patches
+
+    def patchFolders(self):
+        """The folders of the patches (mods) this game is made of, most specific first."""
+        return [folder for name, folder in self.patches()]
+
+    def patchActors(self):
+        """
+        (name, actor IDs) of the patches (mods) this game is made of, most specific first:
+        the actors in each one's own spritedata and spritecategories files.
+        """
+        patches = []
+        gamedef = self
+        while gamedef is not None:
+            if gamedef.custom and gamedef.source == 'mod' and gamedef.gamepath:
+                ids = set()
+                data, categories = gamedef.files['spritedata'].path, gamedef.files['spritecategories'].path
+                if data is not None:
+                    for sprite in etree.parse(data).getroot().iter('sprite'):
+                        if sprite.attrib.get('id', '').isdigit():
+                            ids.add(int(sprite.attrib['id']))
+                        elif 'string_id' in sprite.attrib:
+                            ids.add(sprite.attrib['string_id'])
+                if categories is not None:
+                    for attach in etree.parse(categories).getroot().iter('attach'):
+                        first, _, last = attach.attrib['sprite'].partition('-')
+                        ids.update(range(int(first), int(last or first) + 1))
+                patches.append((gamedef.name, sorted(ids, key=lambda i: (isinstance(i, str), i))))
+            gamedef = gamedef.base
+        return patches
 
     def recursiveFiles(self, name, isPatch=False, folder=False):
         """

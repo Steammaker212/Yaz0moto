@@ -5306,6 +5306,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.ChangeSelectionHandler()
         self.propEditorDock.raise_()
 
+    def ShowCustomIconDialog(self):
+        """Set/Modify Custom Icon... in the properties panel, for the selected actor."""
+        editor = self.spriteDataEditor
+        CustomIconDialog(editor.spritetype, editor.data, self).exec_()
+
+    def CustomIconSaved(self, type_id):
+        """Shows an actor's new patch icon in the palette, the parts bar and the level."""
+        self.sprIconGrid.icons.clear()
+        self.sprIconGrid.update()
+        self.partsBar.refresh()
+        for sprite in globals.Area.sprites:
+            if sprite.type == type_id:
+                sprite.UpdateDynamicSizing()
+
     def ShowSelectionInPartsBar(self, selitems):
         """
         Marks the selected actor or object on the parts bar, adding it there if it isn't

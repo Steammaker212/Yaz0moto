@@ -400,6 +400,93 @@ check('a Y0MI_ icon with raw data is used for that data first (YOMI_ works too)'
       levelColor(6, data7) == '#00ffff' and spriteicons.levelIconLayout(6, data7)[:2] == (1, 1))
 check('the palette keeps the <id>.png icon',QtGui.QColor(spriteicons.spriteIcon(7, 48).toImage().pixel(24, 24)).name() == '#ff0000')
 
+# Set/Modify Custom Icon
+check('a Y0MI_ name is written as ICONS.md shows',
+      spriteicons.y0miName(91, 2, 3, (True, False, False, True)) == 'Y0MI_12905B.png'
+      and spriteicons.y0miName(300, 1, 1, (False, False, True, True)) == 'Y0MI_00312C.png'
+      and spriteicons.y0miName(300, 1, 1, (False, False, True, True), bytes.fromhex('0000 0000 1000 0003 0000 0000'))
+      == 'Y0MI_00312C_0000-0000-1000-0003-0000-0000.png')
+check('a Y0MI_ name reads back as it was written',
+      spriteicons._y0miLayout(spriteicons.y0miName(0xABC, 16, 7, (True, True, False, False))[5:11])
+      == (0xABC, (16, 7, (True, True, False, False))))
+check('only actor IDs that fit in 12 bits can have a Y0MI_ name',
+      spriteicons.fitsY0MI(0xFFF) and not spriteicons.fitsY0MI(0x1000) and not spriteicons.fitsY0MI('MyActor'))
+
+from yaz0moto.dialogs import CustomIconDialog
+from yaz0moto.ui import MiyamotoTheme
+globals.theme = MiyamotoTheme('Yaz0moto')
+yellow = os.path.join(tmp, 'yellow.png')
+pix = QtGui.QPixmap(20, 20)
+pix.fill(QtGui.QColor('#FFFF00'))
+pix.save(yellow)
+icons = os.path.join(patch, 'icons')
+
+dialog = CustomIconDialog(5, bytes(12))
+check('the window offers the enabled patches and needs an image to save',
+      dialog.patchBox.count() == 1 and dialog.patchBox.currentData() == mod.patchFolders()[0]
+      and not dialog.saveButton.isEnabled())
+dialog.setSource(yellow)
+dialog.widthBox.setValue(2)
+dialog.heightBox.setValue(3)
+dialog.positions.button(1).click()
+dialog.rawBox.setChecked(False)
+check('the file name follows the settings', dialog.nameLabel.text() == 'Y0MI_129005.png', dialog.nameLabel.text())
+dialog.saveButton.click()
+check('Save writes the icon with that name and the level shows it',
+      os.path.exists(os.path.join(icons, 'Y0MI_129005.png')) and levelColor(5, None) == '#ffff00'
+      and spriteicons.levelIconLayout(5) == (2, 3, (True, False, False, True)))
+globals.mainWindow.CustomIconSaved.assert_called_with(5)
+check('Save says so', dialog.statusLabel.text() == 'Saved.', dialog.statusLabel.text())
+
+data5 = bytes.fromhex('0000 0000 1000 0003 0000 0000')
+spriteicons.saveY0MI(patch, yellow, 5, 2, 3, (True, False, False, True), data5)
+dialog = CustomIconDialog(5, bytes(12))
+check('the window starts from the icon the actor has',
+      (dialog.widthBox.value(), dialog.heightBox.value()) == (2, 3) and dialog.positions.checkedId() == 1
+      and not dialog.rawBox.isChecked() and dialog.saveButton.isEnabled())
+for dot in range(9):
+    dialog.positions.button(dot).click()
+    up, right, centreV, centreH = dialog.anchor()
+    if not (up == (dot < 3) and centreV == (3 <= dot < 6) and right == (dot % 3 == 2) and centreH == (dot % 3 == 1)):
+        check('the dots are where they draw', False, dot)
+        break
+else:
+    check('the dots are where they draw', True)
+
+dialog.widthBox.setValue(4)
+dialog.positions.button(5).click()  # to the right, centred vertically
+dialog.saveButton.click()
+names = os.listdir(icons)
+check('changing the size or position replaces the icon, without its image being picked again',
+      'Y0MI_326005.png' in names and 'Y0MI_129005.png' not in names and levelColor(5, None) == '#ffff00', names)
+check('the icon for other raw data stays', 'Y0MI_129005_%s.png' % spriteicons.rawDataName(data5) in names, names)
+dialog.saveButton.click()
+check('saving the icon over itself keeps it',
+      [n for n in os.listdir(icons) if n.upper().startswith('Y0MI_326')] == ['Y0MI_326005.png'] and levelColor(5, None) == '#ffff00')
+open(os.path.join(icons, 'yomi_116005.png'), 'wb').write(open(yellow, 'rb').read())
+spriteicons.saveY0MI(patch, yellow, 5, 1, 1, (False, False, True, True))
+check('a YOMI_ name of the same icon is replaced too',
+      not [n for n in os.listdir(icons) if n.lower() in ('yomi_116005.png', 'y0mi_326005.png')])
+
+globals.mainWindow.CustomIconSaved.reset_mock()
+mod.getImageClasses = lambda: {4: object}
+dialog = CustomIconDialog(4, bytes(12))
+dialog.setSource(yellow)
+dialog.rawBox.setChecked(False)
+dialog.saveButton.click()
+check('saving an icon that won\'t replace the actor\'s sprite image says so', 'own sprite image' in dialog.statusLabel.text())
+mod.getImageClasses = lambda: {}
+
+with mock.patch.object(QtWidgets.QMessageBox, 'warning') as warning:
+    dialog = CustomIconDialog(3, bytes(12))
+    dialog.setSource(os.path.join(tmp, 'missing.png'))
+    dialog.saveButton.click()
+    check('a failed Save shows why', warning.called and dialog.statusLabel.text() == '')
+for name in os.listdir(icons):
+    if name.upper().startswith(('Y0MI_', 'YOMI_')) and name[8:11] in ('004', '005', '003'):
+        os.remove(os.path.join(icons, name))
+spriteicons.clearCache()
+
 # ---------------------------------------------------------------- parts bar
 
 from yaz0moto import partsbar
@@ -417,6 +504,47 @@ check('the parts bar keeps the latest parts first, without repeats, up to its si
 check('the parts bar is remembered', [partsbar.decode(k) for k in setting('PartsBar')] == bar.keys)
 check('parts of tilesets that are not loaded are left off the bar',
       partsbar.partIcon(('obj', 3, 0), 40) is None and partsbar.partIcon(('obj', 0, 1), 40) is not None)
+
+# The menu's actors, by category
+before = globals.Sprites, globals.NumSprites, getattr(globals, 'CustomSpriteDefinitions', {}), globals.SpriteCategories
+globals.Sprites = [types.SimpleNamespace(name=n) for n in ('Goomba', 'Koopa', 'Sun', 'Moon', 'Junk')] + [None]
+globals.NumSprites = 6
+globals.CustomSpriteDefinitions = {'mod:star': types.SimpleNamespace(name='Star')}
+globals.SpriteCategories = [('All', [('All Actors', [0, 1, 2, 3, 4, 5, 9999])], []),
+                            ('Enemies', [('Ground', [0, 1])], []),
+                            ('My Patch', [('Sky', [2, 3]), ('No Definition', [5, 7])], []),
+                            ('Useless / Crashing Sprites', [('Useless / Crashing Sprites', [4])], []),
+                            ('Custom', [('Custom Actors', [])], [])]
+menu = partsbar.PartsMenu(bar)
+shown = lambda: [(title, [k[1] for k in keys]) for title, keys in menu.actorGrid.sections]
+check('the category filter lists the views, and the categories of views with several',
+      [menu.category.itemText(i) for i in range(menu.category.count())]
+      == ['All Categories', 'Enemies', 'My Patch', 'My Patch - Sky', 'My Patch - No Definition',
+          'Useless / Crashing Sprites', 'Custom'])
+check('all categories shows every actor but the useless ones, custom actors too',
+      shown() == [('Enemies - Ground', [0, 1]), ('My Patch - Sky', [2, 3]), ('Custom - Custom Actors', ['mod:star'])],
+      shown())
+menu.category.setCurrentText('My Patch')
+check('picking a view shows just its actors', shown() == [('My Patch - Sky', [2, 3])], shown())
+menu.search.setText('moon')
+check('the search works within the category', shown() == [('My Patch - Sky', [3])], shown())
+menu.search.setText('')
+menu.category.setCurrentText('Enemies')
+menu.category.setCurrentText('My Patch - Sky')
+check('picking one category of a view works', shown() == [('My Patch - Sky', [2, 3])], shown())
+menu.category.setCurrentText('Useless / Crashing Sprites')
+check('the useless actors can be picked',
+      shown() == [('Useless / Crashing Sprites - Useless / Crashing Sprites', [4])], shown())
+menu.category.setCurrentText('My Patch')
+menu = partsbar.PartsMenu(bar)
+check('the menu remembers the category', menu.category.currentText() == 'My Patch' and shown() == [('My Patch - Sky', [2, 3])])
+menu.category.setCurrentText('Custom')
+menu.search.setText('star')
+check('custom actors can be searched', shown() == [('Custom - Custom Actors', ['mod:star'])], shown())
+setSetting('PartsMenuCategory', 'A view that is gone')
+menu = partsbar.PartsMenu(bar)
+check('a category that is gone falls back to all of them', menu.category.currentText() == 'All Categories')
+globals.Sprites, globals.NumSprites, globals.CustomSpriteDefinitions, globals.SpriteCategories = before
 
 order = list(bar.keys)
 bar.showSelected(('spr', 3))

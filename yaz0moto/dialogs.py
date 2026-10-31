@@ -29,6 +29,7 @@ Qt = QtCore.Qt
 
 from .bytes import bytes_to_string, to_bytes
 from . import globals
+from . import spriteicons
 from .items import ZoneItem
 from .misc import HexSpinBox, BGName, setting, setSetting, hasLevelNameSources
 from .updater import _CHANNEL_LABELS, _CHANNEL_VALUES, _default_channel, check_for_updates_now
@@ -4954,3 +4955,188 @@ class SpritemapDialog(QtWidgets.QDialog):
                 self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(row + 1)))
                 self.table.setItem(row, 1, QtWidgets.QTableWidgetItem(f'0x{int_id:04X}'))
                 self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(str_id))
+
+
+class CustomIconDialog(QtWidgets.QDialog):
+    """
+    Set/Modify Custom Icon: saves a Y0MI_ icon (see ICONS.md) for an actor in an enabled
+    patch. It starts from the icon the actor has now, if any, so that icon can be changed
+    without picking its image again.
+    """
+    # The Position dots, row by row: what each means, and its (up, right, centreV, centreH)
+    POSITIONS = (
+        ('Up and to the left', (True, False, False, False)),
+        ('Up, centred horizontally', (True, False, False, True)),
+        ('Up and to the right', (True, True, False, False)),
+        ('To the left, centred vertically', (False, False, True, False)),
+        ('Centred on the tile', (False, False, True, True)),
+        ('To the right, centred vertically', (False, True, True, False)),
+        ('Down and to the left', (False, False, False, False)),
+        ('Down, centred horizontally', (False, False, False, True)),
+        ('Down and to the right', (False, True, False, False)),
+    )
+
+    def __init__(self, type_id, data, parent=None):
+        """
+        Creates and initializes the dialog
+        """
+        super().__init__(parent)
+        self.setWindowTitle('Set/Modify Custom Icon')
+        self.setWindowIcon(GetIcon('sprites'))
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        self.type = type_id
+        self.data = bytes(data)
+        self.source = spriteicons.iconPath(type_id, self.data)  # the PNG that Save copies
+        cols, rows, anchor = spriteicons.levelIconLayout(type_id, self.data)
+        if anchor is None:
+            # Icons without a layout are drawn up from the tile, centred
+            anchor = self.POSITIONS[1 if self.source else 4][1]
+
+        self.patchBox = QtWidgets.QComboBox()
+        for name, folder in globals.gamedef.patches():
+            self.patchBox.addItem(name, folder)
+            if self.source and os.path.dirname(os.path.dirname(self.source)) == folder:
+                self.patchBox.setCurrentIndex(self.patchBox.count() - 1)
+
+        tip = ('If set, the raw data currently set in the selected actor is included in the file name. '
+               'Otherwise it consists of just the magic word and the metadata.')
+        rawLabel = QtWidgets.QLabel('Include Raw Data:')
+        rawLabel.setToolTip(tip)
+        self.rawBox = QtWidgets.QCheckBox()
+        self.rawBox.setToolTip(tip)
+        self.rawBox.setChecked(self.source is None or spriteicons.iconPath(type_id, self.data, True) is not None)
+
+        tip = 'The image used for the actor.'
+        imageLabel = QtWidgets.QLabel('Select Image (PNG):')
+        imageLabel.setToolTip(tip)
+        self.imageEdit = QtWidgets.QLineEdit()
+        self.imageEdit.setReadOnly(True)
+        self.imageEdit.setPlaceholderText('No image selected')
+        self.imageEdit.setToolTip(tip)
+        browse = QtWidgets.QPushButton('Browse File...')
+        browse.setAutoDefault(False)
+        browse.setToolTip(tip)
+        browse.clicked.connect(self.HandleBrowse)
+        imageLayout = QtWidgets.QHBoxLayout()
+        imageLayout.addWidget(self.imageEdit, 1)
+        imageLayout.addWidget(browse)
+
+        self.widthBox = QtWidgets.QSpinBox()
+        self.widthBox.setRange(1, 16)
+        self.widthBox.setValue(cols)
+        self.heightBox = QtWidgets.QSpinBox()
+        self.heightBox.setRange(1, 16)
+        self.heightBox.setValue(rows)
+
+        self.positions = QtWidgets.QButtonGroup(self)
+        dots = QtWidgets.QGridLayout()
+        dots.setSpacing(8)
+        for i, (text, _) in enumerate(self.POSITIONS):
+            dot = QtWidgets.QRadioButton()
+            dot.setToolTip(text)
+            self.positions.addButton(dot, i)
+            dots.addWidget(dot, i // 3, i % 3)
+        up, right, centreV, centreH = anchor
+        row = 1 if centreV else 0 if up else 2
+        col = 1 if centreH else 2 if right else 0
+        self.positions.button(row * 3 + col).setChecked(True)
+        positionHelp = QtWidgets.QLabel('The middle dot is the actor\'s tile: the icon goes that way from it, '
+                                        'starting at the tile.')
+        positionHelp.setWordWrap(True)
+        positionLayout = QtWidgets.QHBoxLayout()
+        positionLayout.addLayout(dots)
+        positionLayout.addWidget(positionHelp, 1)
+
+        self.nameLabel = QtWidgets.QLabel()
+        self.nameLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.statusLabel = QtWidgets.QLabel()
+        self.statusLabel.setWordWrap(True)
+
+        buttonBox = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Close)
+        self.saveButton = buttonBox.button(QtWidgets.QDialogButtonBox.Save)
+        buttonBox.accepted.connect(self.HandleSave)
+        buttonBox.rejected.connect(self.reject)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow('Target Mod Patch:', self.patchBox)
+        form.addRow(rawLabel, self.rawBox)
+        form.addRow(imageLabel, imageLayout)
+        form.addRow('Width in Tiles:', self.widthBox)
+        form.addRow('Height in Tiles:', self.heightBox)
+        form.addRow('Position:', positionLayout)
+        form.addRow('File Name:', self.nameLabel)
+
+        mainLayout = QtWidgets.QVBoxLayout()
+        mainLayout.addLayout(form)
+        mainLayout.addWidget(self.statusLabel)
+        mainLayout.addWidget(buttonBox)
+        self.setLayout(mainLayout)
+        self.setMinimumWidth(460)
+
+        self.patchBox.currentIndexChanged.connect(self.UpdateName)
+        self.rawBox.toggled.connect(self.UpdateName)
+        self.widthBox.valueChanged.connect(self.UpdateName)
+        self.heightBox.valueChanged.connect(self.UpdateName)
+        self.positions.buttonClicked.connect(self.UpdateName)
+        self.setSource(self.source)
+
+    def anchor(self):
+        """The (up, right, centreV, centreH) of the picked dot."""
+        return self.POSITIONS[self.positions.checkedId()][1]
+
+    def rawData(self):
+        """The raw data that goes in the file name, or None."""
+        return self.data if self.rawBox.isChecked() else None
+
+    def fileName(self):
+        return spriteicons.y0miName(self.type, self.widthBox.value(), self.heightBox.value(), self.anchor(),
+                                    self.rawData())
+
+    def setSource(self, path):
+        """Sets the PNG that Save copies."""
+        self.source = path
+        self.imageEdit.setText(os.path.basename(path) if path else '')
+        self.imageEdit.setCursorPosition(0)  # long names show their start
+        self.UpdateName()
+
+    def UpdateName(self, *args):
+        """Shows the file name for the settings. What the last Save said doesn't apply to them any more."""
+        self.nameLabel.setText(self.fileName())
+        self.statusLabel.clear()
+        self.saveButton.setEnabled(self.source is not None)
+
+    def HandleBrowse(self):
+        path = QtWidgets.QFileDialog.getOpenFileName(self, 'Select Image', os.path.dirname(self.source or ''),
+                                                     'PNG images (*.png)')[0]
+        if not path:
+            return
+        if bytes(QtGui.QImageReader(path).format()) != b'png':
+            QtWidgets.QMessageBox.warning(self, 'Set/Modify Custom Icon', 'This file is not a PNG image.')
+            return
+        self.setSource(path)
+
+    def HandleSave(self):
+        """Writes the icon right away, over the one this actor and raw data have in the patch."""
+        try:
+            path = spriteicons.saveY0MI(self.patchBox.currentData(), self.source, self.type, self.widthBox.value(),
+                                        self.heightBox.value(), self.anchor(), self.rawData())
+        except OSError as error:
+            QtWidgets.QMessageBox.warning(self, 'Set/Modify Custom Icon',
+                                          'The icon could not be saved:\n\n%s' % error)
+            return
+
+        self.setSource(path)  # the old file may be gone, if its name changed
+        globals.mainWindow.CustomIconSaved(self.type)
+
+        # Save can work and still change nothing in the level, see ICONS.md
+        hasImage = self.type in globals.gamedef.getImageClasses()
+        used = spriteicons.iconPath(self.type, self.data, hasImage)
+        if used is None:
+            status = ('Saved, but this actor has its own sprite image: only an icon with raw data '
+                      'replaces it.')
+        elif os.path.samefile(used, path):
+            status = 'Saved.'
+        else:
+            status = 'Saved, but this actor uses %s first.' % os.path.basename(used)
+        self.statusLabel.setText(status)

@@ -26,6 +26,9 @@ from .ui import GetIcon
 MIME = 'application/x-yaz0moto-part'
 MAX_PARTS = 12
 BAR_ICON = 40
+ALL_CATEGORIES = 'All Categories'
+HIDDEN_VIEW = 'Useless / Crashing Sprites'  # only shown when it's picked
+MODS_PREFIX = 'Mods/'  # so are these: their actors are in the other views too
 DEFAULT_PARTS = ['obj:0:0', 'obj:0:1', 'obj:0:2', 'obj:0:3', 'obj:0:4', 'obj:0:5',
                  'spr:0', 'spr:19', 'spr:45', 'spr:25', 'spr:31']
 
@@ -99,6 +102,23 @@ def partName(key):
             name += ': ' + str(descriptions[key[2]])
         return name
     return '%s (actor %s)' % (spriteicons.spriteName(key[1]), key[1])
+
+
+def actorViews():
+    """
+    The views of actors, [(view, [(category, actor IDs)])]: Mods/<mod> for each enabled mod,
+    then the palette's views without its All view.
+    """
+    gamedef = getattr(globals, 'gamedef', None)
+    patches = gamedef.patchActors() if hasattr(gamedef, 'patchActors') else []
+    views = [(MODS_PREFIX + name, [('Actors', ids)]) for name, ids in patches if ids]
+    for viewname, view, _ in getattr(globals, 'SpriteCategories', None) or ():
+        if viewname == 'Custom':
+            # Filled in by the palette as it lists them
+            view = [(catname, sorted(globals.CustomSpriteDefinitions)) for catname, ids in view]
+        if viewname != 'All':
+            views.append((viewname, view))
+    return views
 
 
 def isArmed():
@@ -484,7 +504,7 @@ class PartsBar(QtWidgets.QToolBar):
 
 
 class PartsMenu(QtWidgets.QFrame):
-    """Every part: a tab per loaded tileset, and the actors with a search box."""
+    """Every part: a tab per loaded tileset, and the actors with a search box and a category filter."""
 
     def __init__(self, bar):
         super().__init__(None, Qt.Popup)
@@ -509,11 +529,24 @@ class PartsMenu(QtWidgets.QFrame):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Search actors...')
         self.search.textChanged.connect(self.filterActors)
-        al.addWidget(self.search)
+        self.category = QtWidgets.QComboBox()
+        self.category.setToolTip('Only show the actors of a category (a patch can add its own)')
+        self.category.setMaxVisibleItems(20)
+        self.category.addItem(ALL_CATEGORIES)
+        for viewname, view in actorViews():
+            self.category.addItem(viewname)
+            if len(view) > 1:
+                self.category.addItems('%s - %s' % (viewname, catname) for catname, ids in view)
+        self.category.setCurrentText(setting('PartsMenuCategory', ALL_CATEGORIES))  # stays on All if it's gone
+        self.category.currentTextChanged.connect(self.pickCategory)
+        filters = QtWidgets.QHBoxLayout()
+        filters.addWidget(self.search, 1)
+        filters.addWidget(self.category, 1)
+        al.addLayout(filters)
         self.actorGrid = self.makeGrid(56)
         al.addWidget(scrolling(self.actorGrid), 1)
         tabs.addTab(actors, GetIcon('sprites'), 'Actors')
-        self.filterActors('')
+        self.filterActors()
 
         hint = QtWidgets.QLabel('Click a part to pick it, then click in the level to place it. You can also drag it onto the level.')
         hint.setStyleSheet('color: palette(mid);')
@@ -539,17 +572,24 @@ class PartsMenu(QtWidgets.QFrame):
         self.grids.append(grid)
         return grid
 
-    def filterActors(self, text):
-        terms = text.lower().split()
+    def pickCategory(self, text):
+        setSetting('PartsMenuCategory', text)
+        self.filterActors()
+
+    def filterActors(self):
+        terms = self.search.text().lower().split()
+        choice = self.category.currentText()
         sections = []
-        for viewname, view, _ in getattr(globals, 'SpriteCategories', None) or ():
-            if viewname in ('All', 'Useless / Crashing Sprites'):
-                continue
+        for viewname, view in actorViews():
             for catname, ids in view:
-                keys = [('spr', i) for i in ids if isinstance(i, int) and 0 <= i < globals.NumSprites
-                        and globals.Sprites[i] is not None
-                        and all(t in globals.Sprites[i].name.lower() or t == str(i) for t in terms)]
-                sections.append(('%s - %s' % (viewname, catname), keys))
+                title = '%s - %s' % (viewname, catname)
+                hidden = viewname == HIDDEN_VIEW or viewname.startswith(MODS_PREFIX)
+                if choice not in (viewname, title) and (choice != ALL_CATEGORIES or hidden):
+                    continue
+                keys = [('spr', i) for i in ids
+                        if (isinstance(i, str) or 0 <= i < globals.NumSprites and globals.Sprites[i] is not None)
+                        and all(t in spriteicons.spriteName(i).lower() or t == str(i) for t in terms)]
+                sections.append((title, keys))
         self.actorGrid.setSections(sections)
 
     def picked(self, key):

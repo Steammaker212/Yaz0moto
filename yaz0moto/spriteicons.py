@@ -40,6 +40,7 @@ from PyQt5 import QtCore, QtGui
 Qt = QtCore.Qt
 
 from . import globals
+from .yaz0 import writeFile
 
 _cache = {}  # (type, size) -> QPixmap
 
@@ -145,10 +146,52 @@ def _y0miLayout(code):
     return value & 0xFFF, (cols, rows, anchor)
 
 
+def fitsY0MI(type_id):
+    """True if a Y0MI_ name can hold this actor's ID: 12 bits, so no custom actors."""
+    return isinstance(type_id, int) and 0 <= type_id <= 0xFFF
+
+
 def rawDataName(data):
     """Sprite data as it's written in an icon's file name: 0000-0000-0000-0000-0000-0000."""
     data = bytes(data)
     return '-'.join(data[i:i + 2].hex().upper() for i in range(0, len(data), 2))
+
+
+def y0miName(type_id, cols, rows, anchor, data=None):
+    """The Y0MI_ file name of an icon (see _y0miLayout), for this raw data if it's given."""
+    up, right, centreV, centreH = anchor
+    flags = up << 3 | right << 2 | centreV << 1 | centreH
+    name = 'Y0MI_%X%X%X%03X' % (cols - 1, rows - 1, flags, type_id)
+    return name + ('_' + rawDataName(data) if data is not None else '') + '.png'
+
+
+def saveY0MI(patch, source, type_id, cols, rows, anchor, data=None):
+    """
+    Copies the PNG source to the patch's icons folder as a Y0MI_ icon and returns its path.
+    The size and placement are part of the name, so overwriting an icon can change its
+    name: the folder's other Y0MI_ icons for this actor and raw data are removed.
+    """
+    with open(source, 'rb') as file:
+        png = file.read()
+
+    folder = os.path.join(patch, 'icons')
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, y0miName(type_id, cols, rows, anchor, data))
+    writeFile(path, png)
+    clearCache()
+
+    data = bytes(data) if data is not None else None
+    for name in os.listdir(folder):
+        stem, ext = os.path.splitext(name)
+        match = _Y0MI_NAME.fullmatch(stem)
+        if match is None or ext.lower() != '.png' or _y0miLayout(match.group('code'))[0] != type_id:
+            continue
+        raw = match.group('raw')
+        other = os.path.join(folder, name)
+        # samefile: the same name in another case is this very file on Windows
+        if (bytes.fromhex(re.sub(r'[-_]', '', raw)) if raw else None) == data and not os.path.samefile(other, path):
+            os.remove(other)
+    return path
 
 
 def _iconIndex():

@@ -2,6 +2,8 @@
 
 Put the PNGs in your patch's icons folder: `patches/<patch name>/icons/`.
 
+**Set/Modify Custom Icon...** in the properties panel of a selected actor does this for you: pick the patch, the image, the size and the position, and Save writes the PNG there with the right name. It replaces the icon that patch already has for this actor and raw data, even if the new size or position changes the name. The button is greyed out if no mod is enabled, and for actors with an ID over 4095.
+
 ## The name
 
 ```
