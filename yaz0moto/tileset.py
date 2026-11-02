@@ -1521,6 +1521,32 @@ def BuildTilesetArchiveDX(name, tiledata, nmldata, colldata, deffile, indexfile,
     return arc.save()[0]
 
 
+def RenameTilesetDX(data, name):
+    """
+    A Deluxe tileset archive (uncompressed bytes) with another tileset name. The name is
+    also inside it, in its textures and its collision and object files, so renaming the
+    file isn't enough.
+    """
+    arc = SarcLib.SARC_Archive(data)
+    chk = [folder for folder in arc.contents if folder.name == 'BG_chk'][0]
+    old = [file.name for file in chk.contents if file.name.startswith('d_bgchk_')][0][len('d_bgchk_'):-len('.bin')]
+    if old == name:
+        return data
+
+    bntx = getTilesetBNTX(arc)
+
+    def texture(texName):
+        image = loadTexFromBNTX(bntx, texName)
+        bits = image.constBits()
+        bits.setsize(image.byteCount())
+        return bytes(bits), image.width(), image.height()
+
+    return BuildTilesetArchiveDX(
+        name, texture(old)[0], texture(old + '_nml')[0], arc['BG_chk/d_bgchk_%s.bin' % old].data,
+        arc['BG_unt/%s.bin' % old].data, arc['BG_unt/%s_hd.bin' % old].data,
+        [(tex.name, *texture(tex.name)) for tex in bntx.textures if tex.name not in (old, old + '_nml')])
+
+
 def WriteTilesetFileDX(name, sarcdata, path=None):
     """
     Yaz0-compresses a Deluxe tileset archive and writes it to `path`, or by default to

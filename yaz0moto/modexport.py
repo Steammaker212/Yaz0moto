@@ -43,6 +43,30 @@ def level_tilesets(level):
     return sorted(names)
 
 
+def native_level(title):
+    """
+    Deluxe: the game level a level file is named after ("1-1" for 1-1.sarc), or None if
+    there's no such level in the game's Course folders.
+    """
+    level = os.path.splitext(title)[0] if isinstance(title, str) else ''
+    if not globals.IsNSMBUDX or not re.fullmatch(r'\d+-\d+', level):
+        return None
+    for path in globals.gamedef.GetGamePaths():
+        if path and any(os.path.isfile(os.path.join(path, level + ext)) for ext in globals.FileExtentions):
+            return level
+    return None
+
+
+def native_tileset_name(level, slot, area):
+    """What the game calls a level's tileset in Unit: Pa1_1-1_3 for slot 1 of 1-1, area 3."""
+    return 'Pa%d_%s_%d' % (slot, level, area)
+
+
+NOT_NATIVE_WARNING = ('The level archive "%s" isn\'t named after one of the game\'s levels (like 1-1.sarc), so the '
+                      'names its tilesets should have in the Unit folder aren\'t known.\n\nThey will keep their '
+                      'current names: you will have to export each tileset manually with the correct name.')
+
+
 def _same_file(a, b):
     if os.path.getsize(a) != os.path.getsize(b):
         return False

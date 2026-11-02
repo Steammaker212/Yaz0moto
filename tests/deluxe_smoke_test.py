@@ -270,6 +270,26 @@ imp = win.editors[3]                          # an empty slot of the open window
 with mock.patch.object(QtWidgets.QFileDialog, 'getOpenFileName', return_value=(exported, '')):
     imp.openTilesetfromFile()
 check('Import Tileset from file reads the exported .szs', px(imp.tileset.tiles[5].image, 30, 30) == (10, 200, 30))
+check('an imported tileset keeps its file name', imp.name == 'Pa1_exported')
+with mock.patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=os.path.join(tmp, 'export')), \
+     mock.patch.object(QtWidgets.QMessageBox, 'information'), \
+     mock.patch.object(QtWidgets.QMessageBox, 'warning') as notNative:
+    os.remove(exported)
+    win.exportAllTilesets()
+check('Export All Tilesets uses that name, warning that the level has no native name',
+      os.path.isfile(exported) and notNative.called)
+
+from yaz0moto import modexport
+open(os.path.join(course, '1-1.sarc'), 'wb').close()
+check('a level named after a game level has native tileset names',
+      modexport.native_level('1-1.sarc') == '1-1' and modexport.native_level('mine.sarc') is None
+      and modexport.native_level('7-7.sarc') is None and modexport.native_tileset_name('1-1', 1, 3) == 'Pa1_1-1_3')
+os.remove(os.path.join(course, '1-1.sarc'))
+renamed = SarcLib.SARC_Archive(T.RenameTilesetDX(yaz0.decompressFASTYZ(raw_exp), 'Pa1_1-1_3'))
+check('renaming a tileset archive changes the names inside it and keeps the tiles',
+      renamed['BG_chk/d_bgchk_Pa1_1-1_3.bin'].data == exp_arc['BG_chk/d_bgchk_Pa1_exported.bin'].data
+      and renamed['BG_unt/Pa1_1-1_3_hd.bin'].data == exp_arc['BG_unt/Pa1_exported_hd.bin'].data
+      and T.loadTexFromBNTX(T.getTilesetBNTX(renamed), 'Pa1_1-1_3') == T.loadTexFromBNTX(T.getTilesetBNTX(exp_arc), 'Pa1_exported'))
 
 # animations (main tileset): frames survive save -> reload through the BNTX
 anim = ed0.animWidget.block

@@ -1,6 +1,8 @@
 
 __pycache__/
 yaz0moto/__pycache__/
+# MSYS shells make a real file for "> nul", which breaks Windows checkouts if it's committed
+nul
 ignore/
 .idea/
 build/

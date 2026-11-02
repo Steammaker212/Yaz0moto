@@ -28,7 +28,8 @@ XXXXXX six hex digits holding these bits (big endian): WWWWHHHH ABCDEEEE EEEEEEE
   D            centred horizontally on the actor's tile (B is ignored)
   EEEEEEEEEEEE the actor ID
 They work like the names above (with raw data: only for that setting of the actor, and
-before an icon for just the ID); a name not starting with Y0MI_ is read as above.
+before an icon for just the ID); a name not starting with Y0MI_ is read as above. A 0 digit
+in their raw data matches any digit: the icon with the most other digits matching wins.
 
 Rendering loads images, so call these outside paint events (the grids queue them).
 """
@@ -134,6 +135,10 @@ _Y0MI_NAME = re.compile(r'Y[0O]MI_(?P<code>[0-9A-F]{6})(?:[-_](?P<raw>[0-9A-F]{4
 # The ids are strings; Y0MI_ icons are under the actor's int ID, with their layout:
 # path is then (path, (columns, rows, (up, right, centreV, centreH))).
 _index = None
+# The Y0MI_ icons with raw data, as they can't be looked up by it (see _y0miMatch):
+# (actor ID, raw data size) -> [(mask of the non-zero digits, raw data, (path, layout))], best first
+_wild = {}
+_matches = {}  # (actor ID, raw data) -> what _y0miMatch found
 
 
 def _y0miLayout(code):
@@ -196,11 +201,13 @@ def saveY0MI(patch, source, type_id, cols, rows, anchor, data=None):
 
 def _iconIndex():
     """The PNGs in the icon folders (read again when the active patch changes)."""
-    global _index
+    global _index, _wild
     folders = iconFolders()
     if _index is None or _index[0] != folders:
         _index = (folders, [])
-        for folder in folders:
+        _matches.clear()
+        found = {}
+        for rank, folder in enumerate(folders):
             try:
                 names = os.listdir(folder)
             except OSError:
@@ -215,8 +222,9 @@ def _iconIndex():
                 if match:
                     type_id, layout = _y0miLayout(match.group('code'))
                     if match.group('raw'):
-                        raw = re.sub(r'[-_]', '', match.group('raw'))
-                        exact[(type_id, bytes.fromhex(raw))] = (path, layout)
+                        raw = re.sub(r'[-_]', '', match.group('raw')).upper()
+                        found.setdefault((type_id, len(raw) // 2), []).append(
+                            (raw.count('0') - len(raw), rank, raw, name, (path, layout)))
                     else:
                         plain[type_id] = (path, layout)
                     continue
@@ -226,14 +234,38 @@ def _iconIndex():
                     raw = re.sub(r'[-_]', '', match.group('raw'))
                     exact[(match.group('id'), bytes.fromhex(raw))] = path
             _index[1].append((plain, exact))
+
+        # Most non-zero digits first, then the most specific patch
+        _wild = {key: [(int(re.sub('[^0]', 'F', raw), 16), int(raw, 16), entry)
+                       for _, _, raw, _, entry in sorted(icons, key=lambda icon: icon[:4])]
+                 for key, icons in found.items()}
     return _index[1]
+
+
+def _y0miMatch(type_id, data):
+    """
+    (entry, exact) for the Y0MI_ icon with raw data that suits this data best, or (None, False).
+    The 0 digits in an icon's raw data match anything; the other digits must be the same. The
+    actor's icons are sorted, so the first that matches has the most digits matching. It's kept
+    until the icons change, as the level asks for it every time an actor changes.
+    """
+    key = (type_id, data)
+    if key not in _matches:
+        value = int.from_bytes(data, 'big')
+        _matches[key] = (None, False)
+        for mask, raw, entry in _wild.get((type_id, len(data)), ()):
+            if value & mask == raw:
+                _matches[key] = (entry, raw == value)
+                break
+    return _matches[key]
 
 
 def _iconEntry(type_id, data=None, exactOnly=False):
     """
-    (path, Y0MI_ layout or None) of the patch icon for an actor: one named after its ID and
-    this raw data if there's one (in any patch), otherwise (unless exactOnly) the one named
-    after its ID; Y0MI_ names first. (None, None) if there isn't one.
+    (path, Y0MI_ layout or None) of the patch icon for an actor: one for this raw data if
+    there's one (in any patch; the same data first, Y0MI_ names first, then the Y0MI_ name
+    matching it best), otherwise (unless exactOnly) the one named after its ID, Y0MI_ names
+    first. (None, None) if there isn't one.
     """
     keys = [str(type_id)]
     if isinstance(type_id, int):
@@ -245,10 +277,14 @@ def _iconEntry(type_id, data=None, exactOnly=False):
     index = _iconIndex()
     if data is not None:
         data = bytes(data)
+        best, same = _y0miMatch(type_id, data)
+        if same:
+            return best
         for plain, exact in index:
-            for key in keys:
-                if (key, data) in exact:
-                    return found(exact[(key, data)])
+            if (str(type_id), data) in exact:
+                return found(exact[(str(type_id), data)])
+        if best is not None:
+            return best
     if not exactOnly:
         for plain, exact in index:
             for key in keys:

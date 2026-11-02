@@ -13,7 +13,7 @@ Y0MI_XXXXXX_<raw data>.png
 
 - The prefix can be `Y0MI_` (zero) or `YOMI_` (letter O), in upper or lower case.
 - `XXXXXX` is exactly **6 hex digits**. They say how big the icon is, where it goes and which actor it's for.
-- `<raw data>` is optional. Copy it from **Info...** in the actor's right-click menu, e.g. `0000-0000-0000-1000-0003-0000`.
+- `<raw data>` is optional. Copy it from **Info...** in the actor's right-click menu, e.g. `0000-0000-0000-1000-0003-0000`. A `0` in it matches any digit (see below).
 - Files that don't start with `Y0MI_` or `YOMI_` use the old naming (`<id>.png`, `<id>_<raw data>.png`).
 
 ## The 6 digits
@@ -77,8 +77,11 @@ Digit 3 is the four flags `ABCD` read as one hex digit:
 
 - **Size:** the image is **stretched** to the size in the name, so its own pixel size and shape don't matter.
 - **Centring:** an even size is centred with half tiles. For example, a 2-wide icon sticks out half a tile on each side.
+- **Zeroes in the raw data:** in a `Y0MI_` name, each `0` digit of the raw data matches any digit, and the other digits must be the same as the actor's. So `0000-0000-0000-1000-0000-0000` is used for `0000-0000-0000-1000-0007-0000`, and for anything else with that `1`. Old-style names must match exactly.
 - **Which icon wins:**
   1. A name with raw data wins over one without, when the actor's settings match.
-  2. For the same actor, a `Y0MI_` icon wins over an old-style one.
-- **Actors with their own sprite image:** only an icon **with raw data** replaces the image, and only for those settings. An icon without raw data replaces only the plain ID box of actors that have no image.
+  2. Among names with raw data, the one with the same data wins, then the `Y0MI_` one with the most non-zero digits. If that's a tie, the most specific patch wins, then the lowest raw data.
+  3. For the same actor, a `Y0MI_` icon wins over an old-style one.
+- **Raw data that is all zeroes:** it matches every setting of the actor, as the last choice among names with raw data.
+- **Actors with their own sprite image:** only an icon **with raw data** replaces the image, and only for the settings it matches. An icon without raw data replaces only the plain ID box of actors that have no image.
 - **Palette:** the Add Actors palette also uses the icon for actors with no image. There it's shrunk to fit and keeps its shape.

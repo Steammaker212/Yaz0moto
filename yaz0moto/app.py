@@ -4270,11 +4270,25 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Copy every tileset the level uses (all areas), as saved, into one folder
         """
-        from .modexport import level_tilesets
+        from .modexport import NOT_NATIVE_WARNING, level_tilesets, native_level, native_tileset_name
+        from .tileset import RenameTilesetDX, WriteTilesetFileDX
         names = level_tilesets(globals.Level)
         if not names:
             QtWidgets.QMessageBox.information(self, 'Export All Tilesets', 'This level uses no tilesets.')
             return
+
+        # Deluxe: each game level has its own tilesets in Unit, named after it
+        native = native_level(self.fileTitle)
+        if globals.IsNSMBUDX and native is None:
+            QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', NOT_NATIVE_WARNING % self.fileTitle)
+        renames = {}  # new name: (area, slot, current name)
+        if native is not None:
+            for number, area in enumerate(globals.Level.areas, 1):
+                for slot in range(1, 4):
+                    name = getattr(area, 'tileset%d' % slot, '')
+                    if name:
+                        renames[native_tileset_name(native, slot, number)] = (area, slot, name)
+            names = [name for name in names if name.startswith('Pa0')] + sorted(renames)
 
         if globals.TilesetEdited:
             reply = QtWidgets.QMessageBox.question(
@@ -4296,13 +4310,17 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             try:
                 if globals.IsNSMBUDX:
                     # The files in Unit are already standalone tilesets: copy them byte for byte
-                    source = globals.gamedef.FindTilesetFile(name)
+                    current = renames[name][2] if name in renames else name
+                    source = globals.gamedef.FindTilesetFile(current)
                     if source is None:
-                        missing.append(name)
+                        missing.append(current)
                         continue
                     target = os.path.join(folder, name + '.szs')
-                    with open(source, 'rb') as f:
-                        yaz0.writeFile(target, f.read())
+                    if current != name:
+                        WriteTilesetFileDX(name, RenameTilesetDX(GetTilesetArchiveData(current), name), target)
+                    else:
+                        with open(source, 'rb') as f:
+                            yaz0.writeFile(target, f.read())
                 else:
                     data = globals.szsData.get(name)
                     if data is None:
@@ -4311,8 +4329,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     target = os.path.join(folder, name + '.sarc')
                     yaz0.writeFile(target, data)
                 written.append(os.path.basename(target))
-            except OSError as e:
-                failed.append('%s: %s' % (name, e.strerror or e))
+            except (OSError, ValueError, RuntimeError) as e:
+                failed.append('%s: %s' % (name, getattr(e, 'strerror', None) or e))
 
         message = 'Exported %d tileset(s) to:\n%s' % (len(written), folder)
         if written:
@@ -4325,6 +4343,39 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', message)
         else:
             QtWidgets.QMessageBox.information(self, 'Export All Tilesets', message)
+
+        exported = [name + '.szs' in written and (renames[name][0], renames[name][1], name) for name in renames]
+        self.UseExportedTilesets([entry for entry in exported if entry], folder)
+
+    def UseExportedTilesets(self, tilesets, folder, parent=None):
+        """
+        Deluxe: the game loads the tilesets named in the level file, so tilesets exported
+        with new names need the level to use them. tilesets: [(area, slot, name)]
+        """
+        tilesets = [entry for entry in tilesets if getattr(entry[0], 'tileset%d' % entry[1]) != entry[2]]
+        if not tilesets:
+            return
+
+        inUnit = any(os.path.normcase(os.path.normpath(folder)) == os.path.normcase(unit)
+                     for unit in globals.gamedef.GetUnitPaths())
+        text = ('This level still uses its old tileset names, so the game won\'t load the exported files until it '
+                'uses the new ones.\n\nUse them in this level? Save the level afterwards.')
+        if not inUnit:
+            text += ('\n\nThe export folder isn\'t your game\'s Unit folder, so the editor will show the game\'s '
+                     'files with those names after reopening the level.')
+        reply = QtWidgets.QMessageBox.question(parent or self, 'Export Tilesets', text,
+                                               QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                                               QtWidgets.QMessageBox.Yes)
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        for area, slot, name in tilesets:
+            setattr(area, 'tileset%d' % slot, name)
+        # Saving the level with this set would rename the tilesets to their hash names again
+        globals.TilesetEdited = False
+        SetDirty()
+        if inUnit:
+            self.ReloadTilesets()
 
     def HandleFullscreen(self, checked):
         """

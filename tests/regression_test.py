@@ -400,6 +400,28 @@ check('a Y0MI_ icon with raw data is used for that data first (YOMI_ works too)'
       levelColor(6, data7) == '#00ffff' and spriteicons.levelIconLayout(6, data7)[:2] == (1, 1))
 check('the palette keeps the <id>.png icon',QtGui.QColor(spriteicons.spriteIcon(7, 48).toImage().pixel(24, 24)).name() == '#ff0000')
 
+# The zeroes in a Y0MI_ name's raw data match anything
+def colourIcon(name, colour):
+    pix = QtGui.QPixmap(20, 20)
+    pix.fill(QtGui.QColor(colour))
+    pix.save(os.path.join(patch, 'icons', name))
+
+raw = lambda text: bytes.fromhex('0000 0000 0000 ' + text)
+colourIcon('Y0MI_000002_0000-0000-0000-1000-0000-0000.png', '#111111')
+colourIcon('Y0MI_000002_0000-0000-0000-1000-0003-0000.png', '#222222')
+colourIcon('Y0MI_000002_0000-0000-0000-0000-0003-0000.png', '#333333')
+colourIcon('2_0000-0000-0000-1000-0007-0000.png', '#444444')
+spriteicons.clearCache()
+check('the icon with the most non-zero digits matching wins, whatever the zeroes are',
+      levelColor(2, raw('1000 0003 0000')) == '#222222' and levelColor(2, raw('1000 0003 00AB')) == '#222222'
+      and levelColor(2, raw('1000 0008 0000')) == '#111111' and levelColor(2, raw('2000 0003 0000')) == '#333333')
+check('a non-zero digit that differs doesn\'t match', levelColor(2, raw('2000 0004 0000')) is None)
+check('an old-style name for the same data comes before a partial match', levelColor(2, raw('1000 0007 0000')) == '#444444')
+for name in os.listdir(os.path.join(patch, 'icons')):
+    if name.startswith(('Y0MI_000002', '2_')):
+        os.remove(os.path.join(patch, 'icons', name))
+spriteicons.clearCache()
+
 # Set/Modify Custom Icon
 check('a Y0MI_ name is written as ICONS.md shows',
       spriteicons.y0miName(91, 2, 3, (True, False, False, True)) == 'Y0MI_12905B.png'
