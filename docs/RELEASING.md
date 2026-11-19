@@ -30,10 +30,18 @@ Pushes to `deluxe-support` that touch code or data publish a pre-release named `
 choose the nightly update channel in Preferences receive these.
 
 ## What the updater checks
-`yaz0moto/updater.py` looks at the releases of `GITHUB_REPO` (`Steammaker212/Yaz0moto`), picks the file whose
-name ends with the right platform suffix, and expects the executable names `Yaz0moto.exe`, `Yaz0moto.app`
+Updates are installed by the updater program, `yaz0moto_updater.py`, which `build.py` freezes on its own
+(`build_updater.py`) into the package's `updater` folder (`Yaz0moto.app/Contents/Resources/updater` on macOS).
+Yaz0moto imports the same file for the rules: it looks at the releases of `GITHUB_REPO`
+(`Steammaker212/Yaz0moto`), picks the file whose name ends with the right platform suffix (the one named after
+the release's version if there are several), and expects the executable names `Yaz0moto.exe`, `Yaz0moto.app`
 and `Yaz0moto.AppImage` inside. If you rename the repository or the program, change them together;
-`tests/branding_test.py` fails when the updater, build scripts, desktop file and workflows disagree.
+`tests/branding_test.py` fails when the updater, build scripts, desktop file and workflows disagree, and
+`tests/updater_test.py` checks downloading, installing, keeping user files and rolling back.
+
+The build workflow runs `Yaz0moto-Updater version` on every platform: a package without a working updater
+can't update itself. A release should contain a build of its own version (not a nightly renamed), although
+the updater remembers the release it installed so it is not offered again.
 
 ## Pulling in changes from Pyamoto
 ```

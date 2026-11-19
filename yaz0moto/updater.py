@@ -1,47 +1,44 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""GitHub release checker and self-updater for packaged Yaz0moto builds."""
+"""
+Update checks and the update dialogs of packaged Yaz0moto builds.
 
-import hashlib
+Yaz0moto finds the newest release and asks the user; the downloading and installing is done
+by the separate updater program (yaz0moto_updater.py, built as Yaz0moto-Updater in the
+`updater` folder of each package):
+
+1. `Yaz0moto-Updater prepare` downloads, verifies and unpacks the update while a progress
+   box shows here (it reports on stdout).
+2. Yaz0moto closes (after the unsaved-work prompt) and starts `Yaz0moto-Updater install`,
+   which waits for it to exit, swaps the new files in and starts the new version.
+3. The updater can't overwrite itself while it runs, so it leaves the new updater as
+   `updater.new`; at its next start Yaz0moto puts that in place (finish_previous_update).
+"""
+
 import os
-import platform
-import posixpath
-import re
-import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 import threading
-import zipfile
+import json
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-import requests
 from PyQt5 import QtCore, QtGui, QtWidgets
+
+import yaz0moto_updater as core
+from yaz0moto_updater import (  # noqa: F401  (re-exported for the rest of the editor and the tests)
+    CHANNEL_NIGHTLY, CHANNEL_OFF, CHANNEL_RELEASE, ReleaseInfo, UpdateError, version_from_tag,
+)
 
 from . import globals
 from .misc import setting, setSetting
 
 
-GITHUB_REPO = 'Steammaker212/Yaz0moto'
-_API_BASE = f'https://api.github.com/repos/{GITHUB_REPO}/releases'
-_API_LATEST = f'{_API_BASE}/latest'
-_API_RECENT = f'{_API_BASE}?per_page=30'
-_RELEASES_URL = f'https://github.com/{GITHUB_REPO}/releases'
-_MAX_EXTRACTED_SIZE = 4 * 1024 * 1024 * 1024
-
-_HEADERS = {
-    'Accept': 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': f'Yaz0moto/{globals.MiyamotoVersion} updater',
-}
-
-CHANNEL_RELEASE = 'release'
-CHANNEL_NIGHTLY = 'nightly'
-CHANNEL_OFF = 'off'
+GITHUB_REPO = core.GITHUB_REPO
+_RELEASES_URL = core.RELEASES_URL
 
 # Kept as an alias so existing callers and old settings continue to work.
 CHANNEL_STABLE = CHANNEL_RELEASE
@@ -49,20 +46,8 @@ CHANNEL_STABLE = CHANNEL_RELEASE
 _CHANNEL_LABELS = ['Release (Latest)', 'Nightly (Pre-release)', 'Off']
 _CHANNEL_VALUES = [CHANNEL_RELEASE, CHANNEL_NIGHTLY, CHANNEL_OFF]
 
-
-class UpdateError(RuntimeError):
-    """An expected update failure suitable for display to the user."""
-
-
-@dataclass(frozen=True)
-class ReleaseInfo:
-    channel: str
-    tag: str
-    version: str
-    title: str
-    page_url: str
-    body: str
-    assets: tuple
+_safe_extract = core.safe_extract
+_release_from_json = core.release_from_json
 
 
 @dataclass(frozen=True)
@@ -72,12 +57,23 @@ class InstallLocation:
     executable: Path
 
 
+def _user_agent():
+    return f'Yaz0moto/{globals.MiyamotoVersion} updater'
+
+
 def _default_channel():
     return CHANNEL_RELEASE
 
 
+def _setting(name, default=None):
+    try:
+        return setting(name, default)
+    except Exception:  # no settings loaded (tests)
+        return default
+
+
 def _current_channel():
-    value = setting('UpdateChannel', None)
+    value = _setting('UpdateChannel', None)
     if value == 'stable':
         return CHANNEL_RELEASE
     if value in _CHANNEL_VALUES:
@@ -86,12 +82,12 @@ def _current_channel():
 
 
 def _is_skipped(tag):
-    skipped = setting('SkippedUpdates', [])
+    skipped = _setting('SkippedUpdates', [])
     return isinstance(skipped, list) and tag in skipped
 
 
 def _skip_release(tag):
-    skipped = setting('SkippedUpdates', [])
+    skipped = _setting('SkippedUpdates', [])
     if not isinstance(skipped, list):
         skipped = []
     if tag not in skipped:
@@ -99,150 +95,30 @@ def _skip_release(tag):
         setSetting('SkippedUpdates', skipped[-20:])
 
 
-def _fetch_json(url):
-    try:
-        response = requests.get(url, headers=_HEADERS, timeout=15)
-        if response.status_code == 403:
-            raise UpdateError('GitHub refused the update check. Please try again later.')
-        if response.status_code == 404 and url == _API_LATEST:
-            raise UpdateError('No GitHub Latest release has been published yet.')
-        if not response.ok:
-            raise UpdateError(f'GitHub update check failed (HTTP {response.status_code}).')
-        response.raise_for_status()
-    except UpdateError:
-        raise
-    except requests.RequestException as exc:
-        raise UpdateError(f'Could not connect to GitHub: {exc}') from exc
-
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise UpdateError('GitHub returned an invalid update response.') from exc
-
-
-def version_from_tag(tag):
-    """
-    The version number in a release tag: 'v1.2.0', 'release-1.2.0' and
-    'Yaz0moto-v1.2.0' all give '1.2.0'. Other tags are returned stripped.
-    """
-    tag = tag.strip()
-    match = re.fullmatch(r'(?:yaz0moto[-_ ]?)?(?:release[-_ ]?)?v?(\d+(?:\.\d+)*)', tag, re.IGNORECASE)
-    return match.group(1) if match else tag
-
-
-def _release_from_json(data, channel):
-    if not isinstance(data, dict):
-        raise UpdateError('GitHub returned an invalid release record.')
-
-    tag = data.get('tag_name')
-    assets = data.get('assets')
-    if not isinstance(tag, str) or not tag or not isinstance(assets, list):
-        raise UpdateError('GitHub release metadata is incomplete.')
-
-    valid_assets = tuple(asset for asset in assets if (
-        isinstance(asset, dict)
-        and isinstance(asset.get('name'), str)
-        and isinstance(asset.get('browser_download_url'), str)
-    ))
-    version = version_from_tag(tag) if channel == CHANNEL_RELEASE else tag
-    if channel == CHANNEL_NIGHTLY:
-        match = re.search(r'-([0-9a-fA-F]{7,40})$', tag)
-        if match:
-            version = match.group(1)
-
-    return ReleaseInfo(
-        channel=channel,
-        tag=tag,
-        version=version,
-        title=str(data.get('name') or tag),
-        page_url=str(data.get('html_url') or f'{_RELEASES_URL}/tag/{tag}'),
-        body=str(data.get('body') or ''),
-        assets=valid_assets,
-    )
-
-
 def _latest_release(channel):
-    if channel == CHANNEL_RELEASE:
-        data = _fetch_json(_API_LATEST)
-        if data.get('draft') or data.get('prerelease'):
-            raise UpdateError('GitHub Latest does not point to a release build.')
-        return _release_from_json(data, channel)
+    return core.latest_release(channel, _user_agent())
 
-    if channel == CHANNEL_NIGHTLY:
-        releases = _fetch_json(_API_RECENT)
-        if not isinstance(releases, list):
-            raise UpdateError('GitHub returned an invalid releases list.')
-        prereleases = [release for release in releases if (
-            isinstance(release, dict)
-            and release.get('prerelease') is True
-            and not release.get('draft')
-        )]
-        if not prereleases:
-            return None
-        prereleases.sort(
-            key=lambda release: release.get('published_at') or release.get('created_at') or '',
-            reverse=True,
-        )
-        return _release_from_json(prereleases[0], channel)
 
+def _installed_tag():
+    """The release the updater installed, while this is still the version it installed."""
+    if _setting('InstalledUpdateVersion') == globals.MiyamotoVersion:
+        return _setting('InstalledUpdateTag')
     return None
 
 
-def _numeric_version(value):
-    if not isinstance(value, str) or not re.fullmatch(r'v?\d+(?:\.\d+)*', value.strip()):
-        return None
-    return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
-
-
 def _is_newer(release):
-    current = str(globals.MiyamotoVersion)
-    if release.channel == CHANNEL_NIGHTLY:
-        return release.version.lower() != current.lower() and release.tag.lower() != current.lower()
-
-    if globals.MiyamotoReleaseType == 'nightly':
-        return True
-    latest_version = _numeric_version(release.version)
-    current_version = _numeric_version(current)
-    if latest_version is not None and current_version is not None:
-        length = max(len(latest_version), len(current_version))
-        latest_version += (0,) * (length - len(latest_version))
-        current_version += (0,) * (length - len(current_version))
-        return latest_version > current_version
-    return release.version.lstrip('vV') != current.lstrip('vV')
-
-
-def _machine():
-    value = platform.machine().lower()
-    if value in ('amd64', 'x64'):
-        return 'x86_64'
-    if value == 'aarch64':
-        return 'arm64'
-    return value
+    return core.is_newer(release, globals.MiyamotoVersion, globals.MiyamotoReleaseType, _installed_tag())
 
 
 def _asset_for_platform(release, system=None, machine=None, appimage=None):
-    system = system or platform.system()
-    machine = machine or _machine()
-    appimage = bool(os.environ.get('APPIMAGE')) if appimage is None else appimage
-
-    if system == 'Windows' and machine == 'x86_64':
-        suffix = '-Windows-x64.zip'
-    elif system == 'Darwin' and machine in ('x86_64', 'arm64'):
-        suffix = '-macOS-universal.zip'
-    elif system == 'Linux' and machine == 'x86_64':
-        suffix = '-Linux-x86_64.AppImage' if appimage else '-Linux-x86_64.zip'
-    else:
-        return None
-
-    matches = [asset for asset in release.assets if asset['name'].endswith(suffix)]
-    return matches[0] if len(matches) == 1 else None
+    return core.asset_for_platform(release, system, machine, appimage)
 
 
 def _install_location():
     appimage = os.environ.get('APPIMAGE')
     if sys.platform.startswith('linux') and appimage:
         target = Path(appimage).expanduser().resolve()
-        return InstallLocation('appimage', target, target)
+        return InstallLocation(core.KIND_APPIMAGE, target, target)
 
     if not getattr(sys, 'frozen', False):
         return None
@@ -253,295 +129,82 @@ def _install_location():
                     if parent.name.endswith('.app')), None)
         if app is None:
             raise UpdateError('Could not locate the installed Yaz0moto app bundle.')
-        return InstallLocation('bundle', app, app / 'Contents' / 'MacOS' / 'Yaz0moto')
+        return InstallLocation(core.KIND_BUNDLE, app, app / 'Contents' / 'MacOS' / 'Yaz0moto')
 
-    return InstallLocation('directory', executable.parent, executable)
-
-
-def _safe_extract(zip_path, destination):
-    destination = Path(destination).resolve()
-    total = 0
-    try:
-        archive = zipfile.ZipFile(zip_path)
-    except (OSError, zipfile.BadZipFile) as exc:
-        raise UpdateError('Downloaded update is not a valid ZIP file.') from exc
-
-    with archive:
-        links = {}
-        for info in archive.infolist():
-            name = info.filename.replace('\\', '/')
-            parts = PurePosixPath(name).parts
-            mode = info.external_attr >> 16
-            if (not name or name.startswith('/') or '..' in parts
-                    or (parts and ':' in parts[0])):
-                raise UpdateError('Downloaded update contains an unsafe file path.')
-            if stat.S_ISLNK(mode):
-                links[name.rstrip('/')] = _safe_link_target(name, archive.read(info))
-            total += info.file_size
-            if total > _MAX_EXTRACTED_SIZE:
-                raise UpdateError('Downloaded update is unexpectedly large.')
-
-        # Nothing may be written through a symlink (a link to a folder followed by
-        # entries "inside" it could otherwise place files anywhere)
-        for info in archive.infolist():
-            parents = PurePosixPath(info.filename.replace('\\', '/')).parents
-            if any(str(parent) in links for parent in parents):
-                raise UpdateError('Downloaded update contains an unsafe file path.')
-
-        # Links may go through other links (frameworks do: Versions/Current), but not
-        # climb out with ".." after one, which could leave the folder once followed
-        for name, link_target in links.items():
-            path, through_link = posixpath.dirname(name), False
-            for part in link_target.split('/'):
-                if part == '..' and through_link:
-                    raise UpdateError('Downloaded update contains an unsafe file path.')
-                if part not in ('', '.'):
-                    path = posixpath.normpath(posixpath.join(path, part))
-                through_link = through_link or path in links
-
-        for info in archive.infolist():
-            name = info.filename.replace('\\', '/')
-            target = destination.joinpath(*PurePosixPath(name).parts)
-            if name.rstrip('/') in links:
-                continue
-            if info.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(info) as source, open(target, 'wb') as output:
-                shutil.copyfileobj(source, output)
-            mode = (info.external_attr >> 16) & 0o777
-            if mode and os.name != 'nt':
-                target.chmod(mode)
-
-        # macOS app bundles need their symlinks (frameworks use them, and the
-        # signature covers them), so recreate them last
-        for name, link_target in links.items():
-            target = destination.joinpath(*PurePosixPath(name).parts)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.symlink(link_target, target)
+    return InstallLocation(core.KIND_DIRECTORY, executable.parent, executable)
 
 
-def _safe_link_target(name, raw):
-    """
-    The target of a symlink entry, if it is relative and stays inside the archive;
-    otherwise the update is refused.
-    """
-    try:
-        link_target = raw.decode('utf-8')
-    except UnicodeDecodeError:
-        raise UpdateError('Downloaded update contains an unsafe file path.')
-    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name.rstrip('/')), link_target))
-    if (not link_target or link_target.startswith('/') or '\\' in link_target or ':' in link_target
-            or resolved == '..' or resolved.startswith('../')):
-        raise UpdateError('Downloaded update contains an unsafe file path.')
-    return link_target
+def _bundled_updater(location):
+    """Where the updater program is in this installation."""
+    name = core.updater_executable_name()
+    if location.kind == core.KIND_BUNDLE:
+        return location.target / 'Contents' / 'Resources' / core.UPDATER_DIR / name
+    if location.kind == core.KIND_APPIMAGE:
+        appdir = os.environ.get('APPDIR') or str(Path(sys.executable).resolve().parent)
+        return Path(appdir) / core.UPDATER_DIR / name
+    return location.target / core.UPDATER_DIR / name
 
 
-def _download_asset(asset, output_path, progress=None):
-    expected = asset.get('size')
-    try:
-        expected = int(expected) if expected is not None else None
-    except (TypeError, ValueError):
-        expected = None
-
-    digest = asset.get('digest')
-    hasher = hashlib.sha256() if isinstance(digest, str) and digest.startswith('sha256:') else None
-    received = 0
-    try:
-        with requests.get(
-                asset['browser_download_url'], headers=_HEADERS,
-                stream=True, timeout=30) as response:
-            response.raise_for_status()
-            with open(output_path, 'wb') as output:
-                for chunk in response.iter_content(1024 * 1024):
-                    if not chunk:
-                        continue
-                    output.write(chunk)
-                    received += len(chunk)
-                    if hasher:
-                        hasher.update(chunk)
-                    if progress:
-                        progress(received, expected or 0)
-    except (requests.RequestException, OSError) as exc:
-        raise UpdateError(f'Could not download the update: {exc}') from exc
-
-    if expected is not None and received != expected:
-        raise UpdateError('Downloaded update has the wrong file size.')
-    if hasher and hasher.hexdigest().lower() != digest.split(':', 1)[1].lower():
-        raise UpdateError('Downloaded update failed its SHA-256 check.')
-
-
-def _prepare_update(release, progress=None):
-    location = _install_location()
+def _check_location(location):
     if location is None:
         raise UpdateError('Automatic updates are available only in packaged Yaz0moto builds.')
     if not location.target.exists():
         raise UpdateError('Current Yaz0moto installation could not be found.')
-    if not os.access(str(location.target.parent), os.W_OK):
-        raise UpdateError('Yaz0moto does not have permission to update this installation.')
+    if '/AppTranslocation/' in str(location.target):
+        raise UpdateError('macOS is running Yaz0moto from a temporary read-only copy, so it can\'t be '
+                          'updated. Move Yaz0moto.app to the Applications folder (or any other folder), '
+                          'open it from there and try again.')
+    folder = location.target if location.kind == core.KIND_DIRECTORY else location.target.parent
+    if not os.access(str(folder), os.W_OK):
+        raise UpdateError('Yaz0moto does not have permission to update this installation '
+                          f'({folder}). Move it to a folder you can write to, or update it by hand.')
 
-    asset = _asset_for_platform(release, appimage=location.kind == 'appimage')
-    if asset is None:
-        raise UpdateError('This release has no update package for the current platform.')
 
-    # Staged next to the installation, not in the temp folder: the helper renames the new
-    # folder into place, which can't be done across drives (Yaz0moto on D:, %TEMP% on C:)
-    work = Path(tempfile.mkdtemp(prefix='.yaz0moto-update-', dir=str(location.target.parent)))
-    download = work / asset['name']
+def _prepare_work(location):
+    """
+    The folder the update is downloaded and unpacked in: on the installation's drive, since
+    the new files are moved (not copied) into place. A folder installation keeps it inside
+    itself; a bundle or AppImage, which is swapped as a whole, next to itself.
+    """
     try:
-        _download_asset(asset, download, progress)
-        if location.kind == 'appimage':
-            staged = work / 'Yaz0moto.AppImage'
-            download.replace(staged)
-            staged.chmod(staged.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        else:
-            extracted = work / 'extracted'
-            extracted.mkdir()
-            _safe_extract(download, extracted)
-            download.unlink()
-            if location.kind == 'bundle':
-                staged = extracted / 'Yaz0moto.app'
-                if not staged.is_dir():
-                    raise UpdateError('macOS update does not contain Yaz0moto.app.')
-                if not (staged / 'Contents' / 'MacOS' / 'Yaz0moto').is_file():
-                    raise UpdateError('macOS update does not contain the Yaz0moto executable.')
-            else:
-                staged = extracted
-                expected_name = 'Yaz0moto.exe' if sys.platform == 'win32' else 'Yaz0moto'
-                # The files may be in a folder of their own inside the ZIP
-                folders = [child for child in staged.iterdir() if child.is_dir()]
-                if not (staged / expected_name).exists() and len(folders) == 1:
-                    staged = folders[0]
-                if not (staged / expected_name).is_file():
-                    raise UpdateError(f'Update does not contain {expected_name}.')
-        return location, staged, work
-    except Exception:
-        shutil.rmtree(work, ignore_errors=True)
-        raise
+        if location.kind == core.KIND_DIRECTORY:
+            work = location.target / core.WORK_DIR
+            if work.exists():
+                shutil.rmtree(work, ignore_errors=True)
+            work.mkdir(parents=True, exist_ok=True)
+            return work
+        return Path(tempfile.mkdtemp(prefix='.yaz0moto-update-', dir=str(location.target.parent)))
+    except OSError as exc:
+        raise UpdateError('Yaz0moto does not have permission to update this installation '
+                          f'({exc}). Move it to a folder you can write to, or update it by hand.') from exc
 
 
-def _ps_quote(value):
-    return "'" + str(value).replace("'", "''") + "'"
-
-
-def _error_file(location):
-    """Where the install helper writes why an update failed, shown at the next start."""
-    return location.target.parent / 'Yaz0moto-update-error.txt'
-
-
-def _write_windows_helper(location, staged, work):
+def _updater_for(location, work):
     """
-    Waits for Yaz0moto to exit, then swaps the installation folder for the new one (or, if
-    the folder can't be renamed, e.g. it's open in Explorer or a terminal, copies the new
-    files over it) and starts Yaz0moto again. If that fails, the old version is started
-    and the error is written to _error_file.
+    The updater program to run. A bundle or AppImage is replaced as a whole (and an
+    AppImage's files disappear when Yaz0moto exits), so its updater runs from a copy.
     """
-    script = work / 'install-update.ps1'
-    backup = location.target.with_name(location.target.name + '.update-backup')
-    new_executable = location.target / location.executable.name
-    content = f"""$ErrorActionPreference = 'Stop'
-$target = {_ps_quote(location.target)}
-$staged = {_ps_quote(staged)}
-$backup = {_ps_quote(backup)}
-$work = {_ps_quote(work)}
-$executable = {_ps_quote(new_executable)}
-$errorFile = {_ps_quote(_error_file(location))}
-Set-Location -LiteralPath (Split-Path -Parent $target)
-
-# Files can stay locked for a moment after Yaz0moto exits (antivirus scans, the indexer)
-function Retry([scriptblock]$action) {{
-    for ($i = 0; $i -lt 20; $i++) {{
-        try {{ & $action; return }} catch {{ $last = $_; Start-Sleep -Milliseconds 500 }}
-    }}
-    throw $last
-}}
-
-Wait-Process -Id {os.getpid()} -Timeout 60 -ErrorAction SilentlyContinue
-Stop-Process -Id {os.getpid()} -Force -ErrorAction SilentlyContinue
-try {{
-    if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Recurse -Force }}
-    $swapped = $false
-    $movedOut = $false
-    try {{ Retry {{ Move-Item -LiteralPath $target -Destination $backup }}; $movedOut = $true }} catch {{ }}
-    if ($movedOut) {{
-        try {{
-            Retry {{ Move-Item -LiteralPath $staged -Destination $target }}
-            $swapped = $true
-        }} catch {{
-            Move-Item -LiteralPath $backup -Destination $target  # put the old version back
-        }}
-    }}
-    if (-not $swapped) {{
-        & robocopy.exe $staged $target /E /R:10 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-        if ($LASTEXITCODE -ge 8) {{ throw "Could not copy the new files into $target (robocopy error $LASTEXITCODE)." }}
-    }}
-    Start-Process -FilePath $executable -WorkingDirectory $target
-    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-}} catch {{
-    $_ | Out-String | Set-Content -LiteralPath $errorFile
-    if (Test-Path -LiteralPath $executable) {{ Start-Process -FilePath $executable -WorkingDirectory $target }}
-}}
-"""
-    script.write_text(content, encoding='utf-8')
-    return script
+    program = _bundled_updater(location)
+    if not program.is_file():
+        raise UpdateError('The updater program is missing from this installation '
+                          f'({program}).\n\nDownload the new version from {_RELEASES_URL}')
+    if location.kind == core.KIND_DIRECTORY:
+        return program
+    copy = work / 'updater-run'
+    shutil.copytree(str(program.parent), str(copy), symlinks=True)
+    return copy / program.name
 
 
-def _write_posix_helper(location, staged, work):
-    script = work / 'install-update.sh'
-    backup = location.target.with_name(location.target.name + '.update-backup')
-    target = shlex.quote(str(location.target))
-    staged_path = shlex.quote(str(staged))
-    backup_path = shlex.quote(str(backup))
-    if location.kind == 'bundle':
-        launch = f'open {target}'
-    else:
-        launch = shlex.quote(str(location.target))
-    content = f"""#!/bin/sh
-while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done
-rm -rf {backup_path}
-if mv {target} {backup_path}; then
-    if mv {staged_path} {target}; then
-        chmod +x {shlex.quote(str(location.executable))} 2>/dev/null || true
-        ({launch} >/dev/null 2>&1 &)
-        rm -rf {backup_path}
-        rm -rf {shlex.quote(str(work))}
-        exit 0
-    fi
-    mv {backup_path} {target}
-fi
-echo {shlex.quote(f'Could not replace {location.target} with the new version.')} >{shlex.quote(str(_error_file(location)))}
-({launch} >/dev/null 2>&1 &)
-exit 1
-"""
-    script.write_text(content, encoding='utf-8')
-    script.chmod(0o700)
-    return script
+def _error_file():
+    return Path(globals.user_data_path) / 'update-error.txt'
 
 
-def _launch_helper(location, staged, work):
-    if sys.platform == 'win32':
-        script = _write_windows_helper(location, staged, work)
-        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'DETACHED_PROCESS', 0)
-        command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)]
-        # Out of Yaz0moto's job (if a launcher put it in one), so the helper isn't killed when
-        # Yaz0moto exits; a job that doesn't allow that refuses, then it's started as before
-        try:
-            subprocess.Popen(command, creationflags=flags | 0x01000000,  # CREATE_BREAKAWAY_FROM_JOB
-                             close_fds=True, cwd=str(location.target.parent))
-        except OSError:
-            subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=str(location.target.parent))
-    else:
-        script = _write_posix_helper(location, staged, work)
-        subprocess.Popen(
-            ['/bin/sh', str(script)],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            cwd=str(location.target.parent),
-        )
+def _log_file():
+    return Path(globals.user_data_path) / 'update.log'
+
+
+def _hidden_window_flags():
+    return getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
 
 
 class _UpdateChecker(QtCore.QObject):
@@ -570,26 +233,95 @@ class _UpdateChecker(QtCore.QObject):
 
 
 class _UpdateWorker(QtCore.QObject):
+    """Runs `Yaz0moto-Updater prepare` and relays its progress."""
     progress = QtCore.pyqtSignal(int)
-    ready = QtCore.pyqtSignal(object, object, object)
+    status = QtCore.pyqtSignal(str)
+    ready = QtCore.pyqtSignal(object, object, object, object)
     failed = QtCore.pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self._process = None
+        self._cancelled = False
 
     def start(self, release):
         self._release = release
         threading.Thread(target=self._run, name='Yaz0moto update download', daemon=True).start()
 
-    def _run(self):
-        try:
-            def report(received, total):
-                self.progress.emit(min(99, int(received * 100 / total)) if total else 0)
+    def cancel(self):
+        self._cancelled = True
+        process = self._process
+        if process is not None and process.poll() is None:
+            process.kill()
 
-            location, staged, work = _prepare_update(self._release, report)
+    def _run(self):
+        work = None
+        try:
+            location = _install_location()
+            _check_location(location)
+            asset = _asset_for_platform(self._release, appimage=location.kind == core.KIND_APPIMAGE)
+            if asset is None:
+                raise UpdateError('This release has no update package for the current platform.')
+
+            work = _prepare_work(location)
+            program = _updater_for(location, work)
+            command = [str(program), 'prepare', '--url', asset['browser_download_url'],
+                       '--name', asset['name'], '--kind', location.kind, '--work', str(work)]
+            if asset.get('size') is not None:
+                command += ['--size', str(asset['size'])]
+            if isinstance(asset.get('digest'), str):
+                command += ['--digest', asset['digest']]
+
+            staged, error, other = self._prepare(command, work)
+            if self._cancelled:
+                raise UpdateError('cancelled')
+            if staged is None:
+                raise UpdateError(error or 'The updater stopped without preparing the update.'
+                                  + ('\n\n' + '\n'.join(other[-8:]) if other else ''))
             self.progress.emit(100)
-            self.ready.emit(location, staged, work)
+            self.ready.emit(location, Path(staged), work, program)
         except UpdateError as exc:
-            self.failed.emit(str(exc))
-        except Exception:
-            self.failed.emit('Unexpected error while preparing the update.')
+            if work is not None:
+                shutil.rmtree(work, ignore_errors=True)
+            self.failed.emit('' if self._cancelled else str(exc))
+        except Exception as exc:
+            if work is not None:
+                shutil.rmtree(work, ignore_errors=True)
+            self.failed.emit(f'Unexpected error while preparing the update: {exc}')
+
+    def _prepare(self, command, work):
+        staged = error = None
+        other = []
+        try:
+            self._process = subprocess.Popen(
+                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=str(work), creationflags=_hidden_window_flags(),
+                universal_newlines=True, encoding='utf-8', errors='replace')
+        except OSError as exc:
+            raise UpdateError(f'Could not start the updater: {exc}') from exc
+
+        for line in self._process.stdout:
+            line = line.strip()
+            try:
+                message = json.loads(line)
+            except ValueError:
+                if line:
+                    other.append(line)
+                continue
+            if not isinstance(message, dict):
+                continue
+            event = message.get('event')
+            if event == 'progress':
+                total = message.get('total') or 0
+                self.progress.emit(min(99, int(message.get('received', 0) * 100 / total)) if total else 0)
+            elif event == 'status':
+                self.status.emit(str(message.get('message', '')))
+            elif event == 'ready':
+                staged = message.get('staged')
+            elif event == 'error':
+                error = str(message.get('message', ''))
+        self._process.wait()
+        return staged, error, other
 
 
 class _UpdateDialog(QtWidgets.QDialog):
@@ -653,10 +385,11 @@ _checker = None
 _worker = None
 _progress = None
 _restore_unsaved_state = False
+_installing_release = None
 
 
 def check_for_updates():
-    _report_failed_install()
+    finish_previous_update()
     channel = _current_channel()
     if channel != CHANNEL_OFF:
         _start_check(channel, manual=False)
@@ -732,15 +465,17 @@ def _confirm_install(release):
 
 
 def _begin_download(release):
-    global _worker, _progress
+    global _worker, _progress, _installing_release
     if _worker is not None:
         return
+    _installing_release = release
     _progress = QtWidgets.QProgressDialog(
-        'Downloading and verifying update...', '', 0, 100, globals.mainWindow
+        'Downloading and verifying update...', 'Cancel', 0, 100, globals.mainWindow
     )
     _progress.setWindowTitle('Yaz0moto Update')
     _progress.setWindowModality(QtCore.Qt.ApplicationModal)
-    _progress.setCancelButton(None)
+    _progress.setAutoClose(False)
+    _progress.setAutoReset(False)
     _progress.setMinimumDuration(0)
     _progress.setValue(0)
     _progress.show()
@@ -749,68 +484,168 @@ def _begin_download(release):
 
     _worker = _UpdateWorker()
     _worker.progress.connect(_progress.setValue)
+    _worker.status.connect(_progress.setLabelText)
     _worker.failed.connect(_install_failed)
     _worker.ready.connect(_install_ready)
+    _progress.canceled.connect(_worker.cancel)
     _worker.start(release)
 
 
+def _close_progress():
+    global _worker, _progress
+    if _progress is not None:
+        try:
+            _progress.canceled.disconnect()
+        except TypeError:
+            pass
+        _progress.close()
+    _worker = None
+    _progress = None
+
+
 def _install_failed(message):
-    global _worker, _progress
-    if _progress is not None:
-        _progress.close()
-    _worker = None
-    _progress = None
+    _close_progress()
     _restore_dirty_state()
-    _show_error(message)
+    if message:  # empty when cancelled
+        _show_error(message)
 
 
-def _install_ready(location, staged, work):
-    global _worker, _progress
-    if _progress is not None:
-        _progress.close()
-    _worker = None
-    _progress = None
+def _install_ready(location, staged, work, program):
+    _close_progress()
 
     window = globals.mainWindow
     if window is not None and not window.close():
         shutil.rmtree(work, ignore_errors=True)
         _restore_dirty_state()
         return
+
+    command = [str(program), 'install', '--kind', location.kind, '--target', str(location.target),
+               '--staged', str(staged), '--work', str(work), '--pid', str(os.getpid()),
+               '--log', str(_log_file()), '--error-file', str(_error_file())]
     try:
-        _launch_helper(location, staged, work)
+        _error_file().unlink()
+    except OSError:
+        pass
+    try:
+        _launch_installer(command, location)
     except (OSError, subprocess.SubprocessError) as exc:
         shutil.rmtree(work, ignore_errors=True)
         if window is not None:
             window.show()
         _restore_dirty_state()
-        _show_error(f'Could not start the update installer: {exc}')
+        _show_error(f'Could not start the updater: {exc}')
+        return
+
+    if _installing_release is not None:
+        setSetting('PendingUpdateTag', _installing_release.tag)
+    _clear_dirty_restore()
+    # The updater waits for Yaz0moto to exit, so make sure it does (the window is
+    # closed and the level saved by now), even if something keeps it running
+    QtWidgets.QApplication.quit()
+    timer = threading.Timer(15, os._exit, (0,))
+    timer.daemon = True
+    timer.start()
+
+
+def _launch_installer(command, location):
+    """Starts the updater detached, so it outlives Yaz0moto."""
+    cwd = str(location.target.parent)
+    if sys.platform == 'win32':
+        flags = _hidden_window_flags() | 0x00000200  # CREATE_NEW_PROCESS_GROUP
+        # Out of Yaz0moto's job (if a launcher put it in one), so the updater isn't killed when
+        # Yaz0moto exits; a job that doesn't allow that refuses, then it's started as before
+        try:
+            subprocess.Popen(command, cwd=cwd, close_fds=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=flags | 0x01000000)  # CREATE_BREAKAWAY_FROM_JOB
+        except OSError:
+            subprocess.Popen(command, cwd=cwd, close_fds=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
     else:
-        _clear_dirty_restore()
-        # The installer waits for Yaz0moto to exit, so make sure it does (the window is
-        # closed and the level saved by now), even if something keeps it running
-        QtWidgets.QApplication.quit()
-        timer = threading.Timer(15, os._exit, (0,))
-        timer.daemon = True
-        timer.start()
+        subprocess.Popen(command, cwd=cwd, close_fds=True, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _report_failed_install():
-    """Shows why the last update couldn't be installed (see _error_file), once."""
+# ---------------------------------------------------------------- after an update
+
+def finish_previous_update():
+    """
+    At startup: says why the last update failed (once), remembers which release was
+    installed, and puts the new updater the last update left (updater.new) in place.
+    """
+    failed = _report_failed_install()
+
+    pending = _setting('PendingUpdateTag')
+    if pending:
+        setSetting('PendingUpdateTag', None)
+        if not failed:
+            setSetting('InstalledUpdateTag', pending)
+            setSetting('InstalledUpdateVersion', globals.MiyamotoVersion)
+
     try:
         location = _install_location()
     except UpdateError:
         return
-    if location is None:
-        return
-    path = _error_file(location)
-    if not path.is_file():
-        return
+    if location is None or location.kind != core.KIND_DIRECTORY:
+        return  # bundles and AppImages bring their new updater with them
+
+    # The updater that started this instance may still be closing: wait a little
+    QtCore.QTimer.singleShot(5000, lambda: install_staged_updater(location.target))
+
+
+def install_staged_updater(target):
+    """Replaces the updater folder with updater.new (left by the last update), if there is one."""
+    target = Path(target)
+    current = target / core.UPDATER_DIR
+    staged = target / core.UPDATER_STAGED_DIR
+    old = target / (core.UPDATER_DIR + '.old')
+
+    for leftover in (old, target / core.BACKUP_DIR, target / core.WORK_DIR):
+        if leftover.exists() and _worker is None:
+            shutil.rmtree(leftover, ignore_errors=True)
+    if not staged.is_dir():
+        return False
+    if not (staged / core.updater_executable_name()).is_file():
+        shutil.rmtree(staged, ignore_errors=True)  # incomplete: keep the working one
+        return False
     try:
-        details = path.read_text(encoding='utf-8', errors='replace').strip()
-        path.unlink()
+        if current.exists():
+            current.rename(old)
+        staged.rename(current)
     except OSError:
-        return
-    _show_error('The last update could not be installed, so this version was kept.\n\n' + details[:1500])
+        if not current.exists() and old.exists():
+            try:
+                old.rename(current)
+            except OSError:
+                pass
+        return False  # tried again at the next start
+    shutil.rmtree(old, ignore_errors=True)
+    return True
+
+
+def _report_failed_install():
+    """Shows why the last update couldn't be installed, once. Returns whether it failed."""
+    paths = [_error_file()]
+    try:
+        location = _install_location()
+    except UpdateError:
+        location = None
+    if location is not None:
+        # Where the install script of older versions wrote it
+        paths.append(location.target.parent / 'Yaz0moto-update-error.txt')
+
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            details = path.read_text(encoding='utf-8', errors='replace').strip()
+            path.unlink()
+        except OSError:
+            continue
+        _show_error('The last update could not be installed, so this version was kept.\n\n'
+                    + details[:1500] + f'\n\nDetails: {_log_file()}')
+        return True
+    return False
 
 
 def _restore_dirty_state():

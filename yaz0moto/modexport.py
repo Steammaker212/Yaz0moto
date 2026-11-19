@@ -62,6 +62,37 @@ def native_tileset_name(level, slot, area):
     return 'Pa%d_%s_%d' % (slot, level, area)
 
 
+# Preferences > General > Tilesets > Export tileset names
+TILESET_NAMES_ROMFS = 'romfs'        # what the game calls them in romfs/Unit (Pa1_1-1_3)
+TILESET_NAMES_INTERNAL = 'internal'  # the names Yaz0moto saves them with (Pa1_BD7694AD00800DD4,
+                                     # tileset.HashTilesetName)
+
+
+def tilesetExportNames():
+    """Which names exported tilesets get: TILESET_NAMES_ROMFS (the default) or TILESET_NAMES_INTERNAL."""
+    from .misc import setting
+    try:
+        value = setting('TilesetExportNames', TILESET_NAMES_ROMFS)
+    except Exception:  # no settings loaded (tests)
+        value = TILESET_NAMES_ROMFS
+    return value if value in (TILESET_NAMES_ROMFS, TILESET_NAMES_INTERNAL) else TILESET_NAMES_ROMFS
+
+
+def export_level(title):
+    """
+    The game level whose romfs/Unit names exported tilesets get (see native_level), or None
+    if internal names are chosen in Preferences or the level isn't one of the game's.
+    """
+    if tilesetExportNames() == TILESET_NAMES_INTERNAL:
+        return None
+    return native_level(title)
+
+
+def warn_not_native(title):
+    """Whether exporting should warn that the romfs/Unit names of this level's tilesets aren't known."""
+    return globals.IsNSMBUDX and tilesetExportNames() == TILESET_NAMES_ROMFS and native_level(title) is None
+
+
 NOT_NATIVE_WARNING = ('The level archive "%s" isn\'t named after one of the game\'s levels (like 1-1.sarc), so the '
                       'names its tilesets should have in the Unit folder aren\'t known.\n\nThey will keep their '
                       'current names: you will have to export each tileset manually with the correct name.')

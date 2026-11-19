@@ -22,7 +22,9 @@ While Pyamoto serves as the incredible upstream foundation for Wii U editing, Ya
 - **Full tileset editing for Deluxe:** *Edit Tilesets* opens the exact files the open level uses from `Unit`, saves them back, and exports or imports standalone `.szs` tilesets, including the block, `?` block, coin and conveyor animations.
 - **Safe switching between games:** opening a Wii U level while Deluxe is selected (or the reverse) offers to switch games instead of corrupting the level.
 - **Wii U support kept:** everything Pyamoto does for the Wii U game still works, and the tests cover Wii U tileset round trips.
-- **Ready-made builds:** Windows, macOS and Linux releases with a built-in updater (release and nightly channels).
+- **Quick Paint:** paint ground and platforms with a brush; edges, corners and fill are picked automatically, and the terrain stays as a few normal objects you can still move, resize, re-tile and undo.
+- **Game tab:** every tileset of the game (Deluxe: straight from `romfs/Unit`) and your object packs, by world and level, ready to paint; objects are copied into the level's tilesets as you place them.
+- **Ready-made builds:** Windows, macOS and Linux releases with a separate updater program (release and nightly channels); `Yaz0moto-Updater update` also works from a terminal.
 - **Easy to move over:** your Pyamoto settings and data are copied across on first launch, and Miyamoto! DX settings are recognised.
 
 The full list is in the [Deluxe changelog](./Deluxe-Changelog.md) and the [general changelog](./CHANGELOG.md).

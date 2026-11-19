@@ -5,6 +5,9 @@ name: Tests
 #   - branding_test.py:     name/updater/build/CI consistency (the updater must never point at another project)
 #   - regression_test.py:   fixes from the v1.0.0 review (paths, text, saving, update packages)
 #   - studio_tools_test.py: Check Level rules and metrics, Export Mod Package, undo history, movement preview, release tags
+#   - updater_test.py:      the updater program: release files, download/unpack, install, keeping user files, rollback
+#   - quickpaint_test.py:   Quick Paint terrain: parts, merging, painting/erasing next to terrain, undo
+#   - gametilesets_test.py: the palette's Game tab: listing every tileset, objects, packs, copying into a level
 
 on:
   push:
@@ -57,3 +60,18 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests/regression_test.py
+
+      - name: Updater
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/updater_test.py
+
+      - name: Quick Paint
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/quickpaint_test.py
+
+      - name: Game tab
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/gametilesets_test.py

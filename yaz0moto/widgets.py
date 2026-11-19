@@ -26,6 +26,8 @@ Qt = QtCore.Qt
 from . import globals
 from . import movementpreview
 from . import partsbar
+from . import gametilesets
+from . import quickpaint
 from . import undomanager
 
 from .items import ObjectItem, ZoneItem, LocationItem, SpriteItem
@@ -266,6 +268,7 @@ class ObjectPickerWidget(QtWidgets.QListView):
 
         self.m0 = self.ObjectListModel()
         self.mall = self.ObjectListModel()
+        self.mall.LoadFromEntries([])  # the Game tab's objects: none until a tileset is picked
         self.m123 = self.objTS123Tab.getModels()
         self.setModel(self.m0)
 
@@ -332,8 +335,12 @@ class ObjectPickerWidget(QtWidgets.QListView):
         # Model refreshes must not change which palette the visible tab shows.
         # In particular, Local refreshes used to display m0 until another tab
         # switch corrected the model.
-        if globals.mainWindow.objAllTab.currentIndex() == 0:
+        tab = globals.mainWindow.objAllTab.currentIndex()
+        if tab == 0:
             self.setModel(self.m0)
+        elif tab == 2:  # Game tab: its objects don't change
+            if self.model() is not self.mall:
+                self.setModel(self.mall)
         else:
             self.setModel(self.objTS123Tab.getActiveModel())
         self.viewport().update()
@@ -342,6 +349,9 @@ class ObjectPickerWidget(QtWidgets.QListView):
         bar = getattr(globals.mainWindow, 'partsBar', None)
         if bar is not None:
             bar.refresh()
+
+        # and the Quick Paint panel's parts
+        quickpaint.refreshPanel()
 
     def ShowTileset(self, id):
         """
@@ -730,7 +740,7 @@ class ObjectPickerWidget(QtWidgets.QListView):
 
             p = index.model().data(index, Qt.DecorationRole)
             if p is None or p.isNull():
-                painter.drawText(option.rect, str(index.row()))
+                painter.drawText(option.rect, Qt.AlignCenter, str(index.row()))
             else:
                 painter.drawPixmap(option.rect.x() + 2, option.rect.y() + 2, p)
             # painter.drawText(option.rect, str(index.row()))
@@ -756,6 +766,7 @@ class ObjectPickerWidget(QtWidgets.QListView):
             self.items = []
             self.ritems = []
             self.itemsize = []
+            self.tooltips = []
 
             for i in range(256):
                 self.items.append(None)
@@ -872,163 +883,26 @@ class ObjectPickerWidget(QtWidgets.QListView):
             self.endResetModel()
 
 
-        def LoadFromFolder(self):
+        def LoadFromEntries(self, entries):
             """
-            Renders all the object previews for the model from a folder
+            Shows the objects of a game tileset or object pack (the Game tab), as
+            gametilesets.Entry objects. They become globals.ObjectAll*, numbered as listed.
             """
-            globals.ObjectAllDefinitions = []
-            globals.ObjectAllCollisions = []
-            globals.ObjectAllImages = []
+            self.beginResetModel()
+
+            globals.ObjectAllDefinitions = [e.obj for e in entries]
+            globals.ObjectAllCollisions = [e.colldata for e in entries]
+            globals.ObjectAllImages = [[e.img, e.nml] for e in entries]
 
             self.items = []
             self.ritems = []
             self.itemsize = []
             self.tooltips = []
 
-            self.beginResetModel()
-
-            # Fixes issues if the user selects the wrong Objects Folder
-            if not globals.mainWindow.folderPicker.currentText():
-                self.endResetModel()
-                return
-
-            z = 0
-            top_folder = os.path.join(setting('ObjPath'), globals.mainWindow.folderPicker.currentText())
-
-            # Get the list of files in the folder
-            files = os.listdir(top_folder)
-            ## Sort the files through "Natural sorting" (opposite of "Lexicographic sorting")
-            files.sort(key=lambda s: [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)])
-
-            # Discard files not enging with ".json" from the list
-            files_ = [file for file in files if file[-5:] == ".json"]
-            del files
-
-            for file in files_:
-                dir = top_folder + "/"
-
-                with open(dir + file) as inf:
-                    jsonData = json.load(inf)
-
-                if not ("colls" in jsonData and "meta" in jsonData and "objlyt" in jsonData
-                        and "img" in jsonData and "nml" in jsonData):
-
-                    # Invalid object JSON
-                    continue
-
-                # Check for the required files
-                found = True
-                for f in ["colls", "meta", "objlyt", "img", "nml"]:
-                    if not os.path.isfile(dir + jsonData[f]):
-                        print("%s not found!" % (dir + jsonData[f]))
-                        found = False
-                        break
-
-                if not found:
-                    # One of the required files is missing
-                    continue
-
-                with open(dir + jsonData["colls"], "rb") as inf:
-                    globals.ObjectAllCollisions.append(inf.read())
-
-                with open(dir + jsonData["meta"], "rb") as inf:
-                    indexfile = inf.read()
-
-                with open(dir + jsonData["objlyt"], "rb") as inf:
-                    deffile = inf.read()
-
-                # Read the object definition file into Object instances
-                indexstruct = struct.Struct('>HBBH')
-
-                data = indexstruct.unpack_from(indexfile, 0)
-                def_ = ObjectDef()
-                def_.width = data[1]
-                def_.height = data[2]
-                def_.folderIndex = globals.mainWindow.folderPicker.currentIndex()
-                def_.objAllIndex = z
-
-                if "randLen" in jsonData:
-                    def_.randByte = data[3]
-
-                else:
-                    def_.randByte = 0
-
-                def_.load(deffile, 0)
-
-                globals.ObjectAllDefinitions.append(def_)
-
-                # Get the properly rendered object definition
-                obj = RenderObjectAll(def_, def_.width, def_.height, True)
-                self.items.append(obj)
-
-                globals.ObjectAllImages.append([QtGui.QPixmap(dir + jsonData["img"]),
-                                        QtGui.QPixmap(dir + jsonData["nml"])])
-
-                img, nml = globals.ObjectAllImages[-1]
-
-                # Render said object definition for the preview
-                tilesUsed = {}
-                tiles = [None] * def_.width * def_.height
-
-                # Load the tiles of the object for the preview
-                ## Start by creating a TilesetTile instance for each tile
-                if def_.reversed:
-                    for crow, row in enumerate(def_.rows):
-                        if def_.subPartAt != -1:
-                            if crow >= def_.subPartAt:
-                                crow -= def_.subPartAt
-
-                            else:
-                                crow += def_.height - def_.subPartAt
-
-                        x = 0
-                        y = crow
-
-                        for tile in row:
-                            if len(tile) == 3:
-                                if tile != [0, 0, 0]:
-                                    tilesUsed[tile[1] & 0x3FF] = y * def_.width + x
-                                    tiles[y * def_.width + x] = TilesetTile(img.copy(x * 60, y * 60, 60, 60), nml.copy(x * 60, y * 60, 60, 60))
-
-                                x += 1
-
-                else:
-                    for crow, row in enumerate(def_.rows):
-                        x = 0
-                        y = crow
-
-                        for tile in row:
-                            if len(tile) == 3:
-                                if tile != [0, 0, 0]:
-                                    tilesUsed[tile[1] & 0x3FF] = y * def_.width + x
-                                    tiles[y * def_.width + x] = TilesetTile(img.copy(x * 60, y * 60, 60, 60), nml.copy(x * 60, y * 60, 60, 60))
-
-                                x += 1
-
-                # Start painting the preview
-                pm = QtGui.QPixmap(def_.width * 60, def_.height * 60)
-                pm.fill(Qt.transparent)
-                p = QtGui.QPainter()
-                p.begin(pm)
-                y = 0
-
-                for row in obj:
-                    x = 0
-                    for tile in row:
-                        if tile != -1:
-                            if tile in tilesUsed:
-                                p.drawPixmap(x, y, tiles[tilesUsed[tile]].main)
-                            else:
-                                try:
-                                    if isinstance(globals.Tiles[tile].main, QtGui.QImage):
-                                        p.drawImage(x, y, globals.Tiles[tile].main)
-                                    else:
-                                        p.drawPixmap(x, y, globals.Tiles[tile].main)
-                                except AttributeError:
-                                    break
-                        x += 60
-                    y += 60
-                p.end()
+            for e in entries:
+                def_ = e.obj
+                self.items.append(RenderObjectAll(def_, def_.width, def_.height, True))
+                pm = gametilesets.entry_pixmap(e, def_.width, def_.height)
 
                 # Resize the preview for a good looking layout
                 pm = pm.scaledToWidth(round(pm.width() * 32 / globals.TileWidth), Qt.SmoothTransformation)
@@ -1039,9 +913,7 @@ class ObjectPickerWidget(QtWidgets.QListView):
 
                 self.ritems.append(pm)
                 self.itemsize.append(QtCore.QSize(pm.width() + 4, pm.height() + 4))
-                self.tooltips.append('Object [id]'.replace('[id]', str(z)))
-
-                z += 1
+                self.tooltips.append(e.label)
 
             self.endResetModel()
 
@@ -5097,6 +4969,10 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
                                  button, buttons, Qt.NoModifier)
 
     def mousePressEvent(self, event):
+        # Quick Paint (its panel's Paint or Erase mode) takes left and right drags
+        if quickpaint.handlePress(self, event):
+            return
+
         button = event.button()
         modifiers = QtWidgets.QApplication.keyboardModifiers()
 
@@ -5161,6 +5037,9 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
     rubberBanding = False
 
     def mouseDoubleClickEvent(self, event):
+        # Quick Paint: ends a line of slopes, or paints like a press
+        if quickpaint.handleDoubleClick(self, event):
+            return
         if (event.button() == Qt.LeftButton and QtWidgets.QApplication.keyboardModifiers() == Qt.NoModifier
                 and not self.wouldPlace(event.pos()) and not self.grabbableAt(event.pos())):
             # A double click on empty space deselects everything; dragging on from it scrolls
@@ -5239,7 +5118,14 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
             return True
         return super().viewportEvent(event)
 
+    def leaveEvent(self, event):
+        quickpaint.handleLeave(self)
+        super().leaveEvent(event)
+
     def mouseMoveEvent(self, event):
+        if quickpaint.handleMove(self, event):
+            return
+
         if self.panning:
             offset = self.panFrom - event.pos()
             self.panFrom = event.pos()
@@ -5270,6 +5156,9 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         self.classicMouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if quickpaint.handleRelease(self, event):
+            return
+
         if event.button() == Qt.LeftButton:
             self.longPress.stop()
             if self.panning:
@@ -5542,37 +5431,19 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
                 SetDirty()
 
             elif globals.CurrentPaintType == 10 and globals.CurrentObject != -1:
-                assert globals.CurrentObject == globals.ObjectAllDefinitions[globals.CurrentObject].objAllIndex
+                # An object of the Game tab: copy it into one of the level's tilesets (or reuse
+                # the copy made before), then paint that
                 type_ = globals.CurrentObject
+                if not globals.ObjectAllDefinitions or not 0 <= type_ < len(globals.ObjectAllDefinitions):
+                    globals.CurrentObject = -1
+                    return
 
-                # Check if the object is already in one of the tilesets
-                if globals.CurrentObject in globals.ObjectAddedtoEmbedded[globals.CurrentArea][globals.mainWindow.folderPicker.currentIndex()]:
-                    (globals.CurrentPaintType,
-                     globals.CurrentObject) = globals.ObjectAddedtoEmbedded[globals.CurrentArea][globals.mainWindow.folderPicker.currentIndex()][
-                         globals.CurrentObject]
-
-                # Try to add the object to one of the tilesets
-                else:
-                    # Get the object definition, collision data, image and normal map
-                    obj = globals.ObjectAllDefinitions[globals.CurrentObject]
-                    colldata = globals.ObjectAllCollisions[globals.CurrentObject]
-                    img, nml = globals.ObjectAllImages[globals.CurrentObject]
-
-                    # Add the object to one of the tilesets and set CurrentPaintType and CurrentObject
-                    (globals.CurrentPaintType,
-                     globals.CurrentObject) = addObjToTileset(obj, colldata, img, nml, True)
-
-                    # Checks if the object fit in one of the tilesets
-                    if globals.CurrentPaintType == 10:
-                        # Revert CurrentObject back to what it was
-                        globals.CurrentObject = type_
-
-                        # Throw a messagebox because the object didn't fit
-                        QtWidgets.QMessageBox.critical(None, 'Cannot Paint', "There isn't enough room left for this object!")
-                        return
-
-                    # Add the object to ObjectAddedtoEmbedded
-                    globals.ObjectAddedtoEmbedded[globals.CurrentArea][obj.folderIndex][type_] = (globals.CurrentPaintType, globals.CurrentObject)
+                copied = gametilesets.copy_into_level(type_)
+                if copied is None:
+                    globals.CurrentPaintType, globals.CurrentObject = 10, type_
+                    QtWidgets.QMessageBox.critical(None, 'Cannot Paint', "There isn't enough room left in the level's tilesets for this object!")
+                    return
+                globals.CurrentPaintType, globals.CurrentObject = copied
 
                 # paint an object
                 clicked = self.mapToScene(event.x(), event.y())
@@ -5588,7 +5459,12 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
                 else:
                     z = layer[-1].zValue() + 1
 
-                obj = ObjectItem(globals.CurrentPaintType, globals.CurrentObject, ln, clickedx, clickedy, 1, 1, z, 0)
+                if globals.PlaceObjectFullSize:
+                    defs = globals.ObjectDefinitions[globals.CurrentPaintType]
+                    ow, oh = defs[globals.CurrentObject].width, defs[globals.CurrentObject].height
+                else:
+                    ow, oh = 1, 1
+                obj = ObjectItem(globals.CurrentPaintType, globals.CurrentObject, ln, clickedx, clickedy, ow, oh, z, 0)
                 mw = globals.mainWindow
                 obj.positionChanged = mw.HandleObjPosChange
                 globals.UndoManager.push(undomanager.AddObjectCommand(obj, ln, z))
@@ -6555,17 +6431,25 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
                         continue
                 
                 if moved_items or resized_items:
+                    # Quick Paint terrain that was moved or resized is re-tiled where it was and
+                    # where it is now, in the same undo step (with the Quick Paint panel open)
+                    retile = quickpaint.wants_retile(moved_items + resized_items)
+
                     # We only want to push to undo if there's an actual change
-                    if len(moved_items) + len(resized_items) > 1:
+                    grouped = len(moved_items) + len(resized_items) > 1 or retile
+                    if grouped:
                         globals.UndoManager.begin_compound("Move/Resize Items")
-                    
+
                     if moved_items:
                         globals.UndoManager.push(undomanager.MoveObjectsCommand(moved_items))
-                    
+
                     for item, old, new in resized_items:
                         globals.UndoManager.push(undomanager.ResizeItemCommand(item, old, new))
-                        
-                    if len(moved_items) + len(resized_items) > 1:
+
+                    if retile:
+                        quickpaint.retile_after_edit(moved_items + resized_items)
+
+                    if grouped:
                         globals.UndoManager.end_compound()
 
                     # A zone moved or resized: its background moves with it
@@ -6612,6 +6496,9 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
 
         # Draw the grid
         drawForegroundGrid(painter, rect)
+
+        # The Quick Paint stroke being drawn, or its brush under the mouse
+        quickpaint.drawOverlay(painter, rect)
 
 
 class InfoPreviewWidget(QtWidgets.QWidget):

@@ -93,6 +93,7 @@ class LevelScene(QtWidgets.QGraphicsScene):
             if not process: continue
             for item in layer:
                 if not isect(item.LevelRect): continue
+                if getattr(item, 'previewHidden', False): continue  # being redone by a Quick Paint stroke
                 add(item)
                 xs = item.objx
                 xe = xs + item.width

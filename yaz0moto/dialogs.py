@@ -17,6 +17,7 @@ import os
 import re
 import json
 import shutil
+import sys
 import weakref
 import zipfile
 from urllib.parse import unquote, urlparse
@@ -1859,6 +1860,7 @@ class PreferencesDialog(QtWidgets.QDialog):
         self.generalTab = self.getGeneralTab()   # merged General + Editor + Tilesets
         self._initial_showActorNotes = self.generalTab.showActorNotes.isChecked()
         self._initial_showInfoIcons = self.generalTab.showInfoIcons.isChecked()
+        self._initial_nativeMenuBar = self.generalTab.nativeMenuBar.isChecked()
         self.toolbarTab = self.getToolbarTab()
         self.themesTab = self.getThemesTab(QtWidgets.QWidget)()
         self.resourcesTab = self.getResourcesTab()
@@ -1896,6 +1898,8 @@ class PreferencesDialog(QtWidgets.QDialog):
         if self.editorTab.showActorNotes.isChecked() != self._initial_showActorNotes:
             return True
         if self.editorTab.showInfoIcons.isChecked() != self._initial_showInfoIcons:
+            return True
+        if self.generalTab.nativeMenuBar.isChecked() != self._initial_nativeMenuBar:
             return True
         if self.themesTab.themeBox.currentText() != self.themesTab._initial_theme:
             return True
@@ -1987,12 +1991,23 @@ class PreferencesDialog(QtWidgets.QDialog):
                     self.useOuterSarcFormat.toggled.connect(
                         lambda checked: self.modifyInnerName.setVisible(checked))
 
+                # macOS only: menus in macOS's own menu bar instead of the window
+                self.nativeMenuBar = QtWidgets.QCheckBox('Use the macOS menu bar (top of the screen)')
+                self.nativeMenuBar.setToolTip(
+                    'When enabled, File, Edit, View, Area and Help are in the menu bar at the top of the '
+                    'screen. When disabled (the default), they are at the top of the Yaz0moto window, which '
+                    'always shows them. Takes effect after a restart.')
+                self.nativeMenuBar.setChecked(bool(setting('NativeMenuBar', False)))
+                self.nativeMenuBar.setVisible(sys.platform == 'darwin')
+
                 gen_form = QtWidgets.QFormLayout()
                 gen_form.addRow('File opening behavior:', self.openMethod)
                 gen_form.addRow('Launch behavior:', self.launchBehavior)
                 gen_form.addRow(self.useOuterSarcFormat)
                 if not globals.IsNSMBUDX:
                     gen_form.addRow(self.modifyInnerName)
+                if sys.platform == 'darwin':
+                    gen_form.addRow(self.nativeMenuBar)
                 gen_form.addRow('Updates:', update_row)
 
                 gen_lay = QtWidgets.QVBoxLayout()
@@ -2093,10 +2108,32 @@ class PreferencesDialog(QtWidgets.QDialog):
                 self.autoSave.setToolTip('Skips the save confirmation dialog when closing the tileset editor.')
                 self.autoSave.setChecked(setting('AutoSaveTilesets', False))
 
+                # Which names Export Tileset / Export All Tilesets give the files
+                from .modexport import TILESET_NAMES_INTERNAL, TILESET_NAMES_ROMFS, tilesetExportNames
+                self.tilesetExportNames = QtWidgets.QComboBox()
+                self.tilesetExportNames.addItem('RomFS file names (as in the game\'s Unit folder, e.g. Pa1_1-1_3)',
+                                                TILESET_NAMES_ROMFS)
+                self.tilesetExportNames.addItem('Internal names (as Yaz0moto saves them, e.g. Pa1_BD7694AD00800DD4)',
+                                                TILESET_NAMES_INTERNAL)
+                self.tilesetExportNames.setCurrentIndex(self.tilesetExportNames.findData(tilesetExportNames()))
+                self.tilesetExportNames.setToolTip(
+                    '<b>RomFS file names</b>: tilesets of a level named after one of the game\'s levels (like '
+                    '1-1.sarc) are exported with the names the game gives them in romfs/Unit '
+                    '(Pa&lt;slot&gt;_&lt;level&gt;_&lt;area&gt;).<br>'
+                    '<b>Internal names</b>: tilesets are exported with the name Yaz0moto gives a tileset when it saves '
+                    'it: Pa&lt;slot&gt;_ followed by a CRC32 of the tileset\'s contents and their size (16 hex '
+                    'digits), so each version of a tileset has its own name and never replaces another level\'s. '
+                    'The main tileset (Pa0) keeps its name.<br>'
+                    'Either way, the game loads the tilesets named in the level, so when the names change you are '
+                    'offered to make the level use them.')
+                ts_names = QtWidgets.QFormLayout()
+                ts_names.addRow('Export tileset names:', self.tilesetExportNames)
+
                 ts_lay = QtWidgets.QVBoxLayout()
                 ts_lay.addWidget(self.useRGBA8)
                 ts_lay.addWidget(self.alwaysRepack)
                 ts_lay.addWidget(self.autoSave)
+                ts_lay.addLayout(ts_names)
                 tileset_group = QtWidgets.QGroupBox('Tilesets')
                 tileset_group.setLayout(ts_lay)
                 vbox.addWidget(tileset_group)

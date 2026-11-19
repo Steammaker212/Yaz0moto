@@ -107,6 +107,8 @@ from .tileset import *
 from .ui import *
 from . import movementpreview
 from . import partsbar
+from . import gametilesets
+from . import quickpaint
 from . import undomanager
 from .undomanager import UndoManager
 from .verifications import *
@@ -960,8 +962,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.actions['mergelocations'].setEnabled(False)
         self.actions['deselect'].setEnabled(False)
 
-        menubar = QtWidgets.QMenuBar()
-        self.setMenuBar(menubar)
+        # The window's own menu bar (a parentless QMenuBar becomes macOS's shared default bar,
+        # which other windows and dialogs then take over); in the window unless the macOS
+        # menu bar is chosen in Preferences, see ui.useNativeMenuBar
+        menubar = setupMenuBar(self.menuBar())
 
         fmenu = menubar.addMenu('&File')
         fmenu.addAction(self.actions['newlevel'])
@@ -1007,6 +1011,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         emenu.addAction(self.actions['freezelocations'])
         emenu.addAction(self.actions['freezepaths'])
         emenu.addAction(self.actions['freezecomments'])
+        self.emenu = emenu  # Quick Paint's Re-tile Selection is added in SetupDocksAndPanels
 
         vmenu = menubar.addMenu('&View')
         vmenu.addAction(self.actions['showlay0'])
@@ -1259,6 +1264,40 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         act.setStatusTip('Show or hide the Undo History window')
         self.vmenu.addAction(act)
 
+        # Quick Paint: paint terrain that picks its own edges and corners
+        dock = QtWidgets.QDockWidget('Quick Paint', self)
+        dock.setFeatures(
+            QtWidgets.QDockWidget.DockWidgetMovable | QtWidgets.QDockWidget.DockWidgetFloatable | QtWidgets.QDockWidget.DockWidgetClosable)
+        dock.setObjectName('quickpaint')  # needed for the state to save/restore correctly
+        self.quickPaint = quickpaint.QuickPaintPanel()
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setWidget(self.quickPaint)
+        dock.setWidget(scroll)
+        self.quickPaintDock = dock
+
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        dock.setVisible(False)
+        act = dock.toggleViewAction()
+        act.setShortcut(QtGui.QKeySequence('Ctrl+Shift+P'))
+        act.setIcon(GetIcon('objects'))
+        act.setStatusTip('Show or hide Quick Paint, for painting terrain that picks its own edges and corners')
+        # Closing the panel stops painting (checked once things settle: floating or docking it
+        # hides and shows it again straight away)
+        act.toggled.connect(lambda shown: shown or QtCore.QTimer.singleShot(
+            0, lambda: self.quickPaintDock.isVisible() or quickpaint.setMode(quickpaint.MODE_OFF)))
+        # Opening it from the menu starts painting straight away
+        act.triggered.connect(lambda checked: checked and quickpaint.panelOpened())
+        self.vmenu.addAction(act)
+
+        act = QtWidgets.QAction('Re-tile Terrain Selection', self)
+        act.setShortcut(QtGui.QKeySequence('Ctrl+Shift+T'))
+        act.setStatusTip('Fix the edges and corners of the selected Quick Paint terrain (with the preset open in Quick Paint)')
+        act.triggered.connect(lambda: quickpaint.retile_selection(False))
+        self.emenu.addSeparator()
+        self.emenu.addAction(act)
+
 
         # All "Selected X Properties" editors share a single dock so they remember
         # one position. PropEditorStack swaps the active editor; the dock title
@@ -1400,6 +1439,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.objTS123Tab = EmbeddedTab()
         self.objAllTab.addTab(self.objTS0Tab, tsicon, 'Main')
         self.objAllTab.addTab(self.objTS123Tab, tsicon, 'Local')
+        self.objGameTab = gametilesets.GameTab()
+        self.objAllTab.addTab(self.objGameTab, tsicon, 'Game')
+        self.objAllTab.setTabToolTip(2, 'Every tileset of the game (and your object packs), by world and level. '
+                                        "Painting an object copies it into the level's tilesets.")
 
         oel = QtWidgets.QVBoxLayout(self.objTS0Tab)
         self.createObjectLayout = oel
@@ -3563,6 +3606,10 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         setSetting('OverrideTilesetSaving', dlg.tilesetsTab.alwaysRepack.isChecked())
         setSetting('AutoSaveTilesets', dlg.tilesetsTab.autoSave.isChecked())
+        setSetting('TilesetExportNames', dlg.tilesetsTab.tilesetExportNames.currentData())
+
+        # macOS: menus in the window or in macOS's menu bar (applied by the restart below)
+        setSetting('NativeMenuBar', dlg.generalTab.nativeMenuBar.isChecked())
 
         # Theme, style, toolbar and mod changes take effect by restarting (after asking); the
         # open level comes back as it was. If the restart is put off, mods apply right away and
@@ -4270,25 +4317,48 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Copy every tileset the level uses (all areas), as saved, into one folder
         """
-        from .modexport import NOT_NATIVE_WARNING, level_tilesets, native_level, native_tileset_name
-        from .tileset import RenameTilesetDX, WriteTilesetFileDX
+        import re
+        from .modexport import (NOT_NATIVE_WARNING, TILESET_NAMES_INTERNAL, level_tilesets, export_level,
+                                native_tileset_name, tilesetExportNames, warn_not_native)
+        from .tileset import (GENERATED_TILESET_NAME, HashTilesetNameFromArchive, RenameTilesetDX,
+                              WriteTilesetFileDX)
         names = level_tilesets(globals.Level)
         if not names:
             QtWidgets.QMessageBox.information(self, 'Export All Tilesets', 'This level uses no tilesets.')
             return
 
-        # Deluxe: each game level has its own tilesets in Unit, named after it
-        native = native_level(self.fileTitle)
-        if globals.IsNSMBUDX and native is None:
+        # Deluxe: each game level has its own tilesets in Unit, named after it (unless
+        # Preferences says to keep the level's internal names)
+        native = export_level(self.fileTitle)
+        if warn_not_native(self.fileTitle):
             QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', NOT_NATIVE_WARNING % self.fileTitle)
-        renames = {}  # new name: (area, slot, current name)
+        renames = {}  # new name: [(area, slot, current name), ...]
         if native is not None:
             for number, area in enumerate(globals.Level.areas, 1):
                 for slot in range(1, 4):
                     name = getattr(area, 'tileset%d' % slot, '')
                     if name:
-                        renames[native_tileset_name(native, slot, number)] = (area, slot, name)
+                        renames.setdefault(native_tileset_name(native, slot, number), []).append((area, slot, name))
             names = [name for name in names if name.startswith('Pa0')] + sorted(renames)
+        elif globals.IsNSMBUDX and tilesetExportNames() == TILESET_NAMES_INTERNAL:
+            # The names Yaz0moto saves tilesets with (Pa1_BD7694AD00800DD4): worked out from
+            # each tileset's contents, unless it already has one
+            QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                hashed = {}
+                for area in globals.Level.areas:
+                    for slot in range(1, 4):
+                        name = getattr(area, 'tileset%d' % slot, '')
+                        if not name:
+                            continue
+                        if name not in hashed:
+                            data = None if re.match(GENERATED_TILESET_NAME, name) else GetTilesetArchiveData(name)
+                            hashed[name] = name if data is None else (HashTilesetNameFromArchive(name, data) or name)
+                        renames.setdefault(hashed[name], []).append((area, slot, name))
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+            done = {current for entries in renames.values() for (_, _, current) in entries}
+            names = [name for name in names if name not in done] + sorted(renames)
 
         if globals.TilesetEdited:
             reply = QtWidgets.QMessageBox.question(
@@ -4310,7 +4380,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             try:
                 if globals.IsNSMBUDX:
                     # The files in Unit are already standalone tilesets: copy them byte for byte
-                    current = renames[name][2] if name in renames else name
+                    current = renames[name][0][2] if name in renames else name
                     source = globals.gamedef.FindTilesetFile(current)
                     if source is None:
                         missing.append(current)
@@ -4344,8 +4414,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         else:
             QtWidgets.QMessageBox.information(self, 'Export All Tilesets', message)
 
-        exported = [name + '.szs' in written and (renames[name][0], renames[name][1], name) for name in renames]
-        self.UseExportedTilesets([entry for entry in exported if entry], folder)
+        exported = [(area, slot, name) for name, entries in renames.items() if name + '.szs' in written
+                    for (area, slot, current) in entries]
+        self.UseExportedTilesets(exported, folder)
 
     def UseExportedTilesets(self, tilesets, folder, parent=None):
         """
@@ -4955,11 +5026,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.objPicker.LoadFromTilesets()
 
         if globals.Area.tileset0 != '':
-            self.objAllTab.setCurrentIndex(0)
+            if self.objAllTab.currentIndex() != 2:  # the Game tab stays open
+                self.objAllTab.setCurrentIndex(0)
             self.objAllTab.setTabEnabled(0, True)
 
         else:
-            self.objAllTab.setCurrentIndex(1)
+            if self.objAllTab.currentIndex() != 2:
+                self.objAllTab.setCurrentIndex(1)
             self.objAllTab.setTabEnabled(0, False)
 
         # Load events
@@ -5403,6 +5476,8 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         CPT = -1
         if idx == 0:  # objects
             CPT = self.objAllTab.currentIndex()
+            if CPT == 2:  # Game tab
+                CPT = 10
         elif idx == 1 and self.sprAllTab.currentIndex() != 1:  # sprites
             CPT = 4
         elif idx == 2:
@@ -5419,7 +5494,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             CPT = 9  # comment
 
         type = -1
-        if CPT in (0, 1):
+        if CPT in (0, 1, 10):
             index = self.objPicker.currentIndex()
             if index.isValid():
                 if CPT == 1:  # Embedded tab: resolve to slot + paint type
@@ -5433,7 +5508,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
     def ObjTabChanged(self, nt):
         """
         Handles the selected slot tab in the object palette changing.
-        Tab indices: 0=Main, 1=Embedded
+        Tab indices: 0=Main, 1=Embedded, 2=Game (paint type 10)
         """
         if hasattr(self, 'objPicker'):
             if nt == 0:
@@ -5442,8 +5517,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             elif nt == 1:
                 self.objPicker.ShowTileset(2)
                 self.objTS123Tab.setLayout(self.createObjectLayout)
+            elif nt == 2:
+                self.objPicker.ShowTileset(1)
+                self.objGameTab.pickerHost.setLayout(self.createObjectLayout)
+                self.objGameTab.activate()
             self.defaultPropDock.setVisible(False)
-        globals.CurrentPaintType = nt
+        globals.CurrentPaintType = 10 if nt == 2 else nt
 
     def SprTabChanged(self, nt):
         """
@@ -5680,8 +5759,9 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # Decide by the visible tab, not CurrentPaintType: that can still hold a
         # stale value (e.g. 4 from the Actors tab at startup), which made Main
         # objects get decoded as Local ones.
-        if globals.CurrentPaintType == 10:
+        if self.objAllTab.currentIndex() == 2:
             globals.CurrentObject = type
+            globals.CurrentPaintType = 10
 
         elif self.objAllTab.currentIndex() == 1:
             globals.CurrentObject, globals.CurrentPaintType = self.objTS123Tab.getObjectAndPaintType(type)
@@ -5694,15 +5774,23 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         Handles a new object being chosen to replace the selected objects
         """
-        if globals.CurrentPaintType == 10: return
-
         items = self.scene.selectedItems()
         type_obj = ObjectItem
         tileset = 0
         changed = False
         data = 0
 
-        if self.objAllTab.currentIndex() == 1:
+        if self.objAllTab.currentIndex() == 2:
+            # A game object: copy it into the level's tilesets first
+            if type < 0 or not any(isinstance(x, type_obj) for x in items):
+                return
+            copied = gametilesets.copy_into_level(type)
+            if copied is None:
+                QtWidgets.QMessageBox.critical(self, 'Cannot Replace', "There isn't enough room left in the level's tilesets for this object!")
+                return
+            tileset, type = copied
+
+        elif self.objAllTab.currentIndex() == 1:
             type, tileset = self.objTS123Tab.getObjectAndPaintType(type)
 
         else:
@@ -6433,7 +6521,11 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # Esc closes the properties panel (like its X), then puts down the picked part, so
         # clicking the level selects again. It never closes the editor itself.
         if event.key() == Qt.Key_Escape:
-            if self.propEditorDock.isVisible():
+            if quickpaint.isActive():
+                # A line of slopes being drawn ends first, then painting stops
+                if not quickpaint.cancel():
+                    quickpaint.setMode(quickpaint.MODE_OFF)
+            elif self.propEditorDock.isVisible():
                 self.propEditorDock.close()
             elif partsbar.isArmed():
                 partsbar.disarm()
@@ -6615,11 +6707,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             HandleTilesetEdited(True)
 
             if globals.Area.tileset0 != '':
-                self.objAllTab.setCurrentIndex(0)
+                if self.objAllTab.currentIndex() != 2:  # the Game tab stays open
+                    self.objAllTab.setCurrentIndex(0)
                 self.objAllTab.setTabEnabled(0, True)
 
             else:
-                self.objAllTab.setCurrentIndex(1)
+                if self.objAllTab.currentIndex() != 2:
+                    self.objAllTab.setCurrentIndex(1)
                 self.objAllTab.setTabEnabled(0, False)
 
             for layer in globals.Area.layers:

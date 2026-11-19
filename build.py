@@ -184,7 +184,8 @@ setup(
             'packages': ['encodings', 'encodings.hex_codec', 'encodings.utf_8', 'addrlib', 'bc3', 'bntxlib', 'bntxlib.bcn', 'yaz0moto', 'requests', 'certifi'],
             # PyQt5 loads its OpenGL function wrappers by name at runtime, so cx_Freeze
             # can't see them: the live background (yaz0moto/dvgl.py) needs this one
-            'includes': ['fastyz', 'cython_available', 'gtx_quick_cy', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0', 'PyQt5.QtSvg'],
+            'includes': ['fastyz', 'cython_available', 'gtx_quick_cy', 'addrlib', 'bc3', 'bntxlib', 'ssl', 'PyQt5._QOpenGLFunctions_2_0', 'PyQt5.QtSvg',
+                         'yaz0moto_updater'],  # the update rules, shared with the updater program
             'build_exe': dir_,
             'optimize': 2,
             'silent': True,
@@ -209,6 +210,20 @@ setup(
         ],
     )
 print('>> Built frozen executable!')
+
+
+# The updater program (yaz0moto_updater.py), frozen separately with its own runtime so it
+# can replace all of Yaz0moto's files: in the package's updater/ folder, inside the bundle
+# on macOS (Contents/Resources/updater, signed with the rest of it)
+import subprocess
+if 'bdist_mac' in sys.argv:
+    updater_dir = 'build/Yaz0moto.app/Contents/Resources/updater'
+else:
+    updater_dir = os.path.join(dir_, 'updater')
+if os.path.isdir(updater_dir):
+    shutil.rmtree(updater_dir)
+print('>> Freezing the updater into %s' % updater_dir)
+subprocess.check_call([sys.executable, 'build_updater.py', updater_dir])
 
 
 

@@ -58,6 +58,14 @@ jobs:
         if: steps.build.outcome == 'failure'
         run: python build.py build_ext --inplace build_exe
 
+      # Yaz0moto installs its updates with this program; a package without it can't update
+      - name: Check the updater runs
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}"
+          & ".\distrib\miyamoto_v$v\updater\Yaz0moto-Updater.exe" version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: Package as zip
         shell: pwsh
         run: |
@@ -160,6 +168,11 @@ jobs:
           echo "$INFO" | grep -q arm64
           echo "Symlinks kept in the bundle: $(find "$CHECK/Yaz0moto.app" -type l | wc -l)"
 
+          # The updater (signed above with the rest of the bundle) must run on its own
+          UPDATER="$CHECK/Yaz0moto.app/Contents/Resources/updater/Yaz0moto-Updater"
+          lipo -info "$UPDATER"
+          "$UPDATER" version
+
           # It must also start: macOS kills it at launch if a library's signature is
           # broken, and a missing module stops it too. A fresh HOME gives it no settings,
           # so it opens the first-run setup and waits there.
@@ -217,6 +230,9 @@ jobs:
 
       - name: Build
         run: python build.py build_ext --inplace build_exe
+
+      - name: Check the updater runs
+        run: distrib/miyamoto_v${{ inputs.version }}/updater/Yaz0moto-Updater version
 
       - name: Assemble AppDir
         run: |

@@ -284,6 +284,21 @@ open(os.path.join(course, '1-1.sarc'), 'wb').close()
 check('a level named after a game level has native tileset names',
       modexport.native_level('1-1.sarc') == '1-1' and modexport.native_level('mine.sarc') is None
       and modexport.native_level('7-7.sarc') is None and modexport.native_tileset_name('1-1', 1, 3) == 'Pa1_1-1_3')
+# Preferences > Export tileset names
+check('by default (RomFS file names) a game level\'s tilesets are exported with the game\'s names',
+      modexport.tilesetExportNames() == modexport.TILESET_NAMES_ROMFS and modexport.export_level('1-1.sarc') == '1-1'
+      and modexport.warn_not_native('mine.sarc'))
+setSetting('TilesetExportNames', modexport.TILESET_NAMES_INTERNAL)
+hashed, hashed_data = imp.exportNameAndData()
+import re as _re
+check('with internal names chosen, a tileset is exported with the name Yaz0moto saves it with '
+      '(Pa<slot>_<CRC32><size>), without the warning',
+      modexport.export_level('1-1.sarc') is None and not modexport.warn_not_native('mine.sarc')
+      and _re.fullmatch(r'Pa3_[0-9A-F]{16}', hashed) and imp.exportName() == hashed
+      and hashed == T.HashTilesetName(3, imp.saveBuffers()))
+check('...and the same name is worked out again from the exported file (Area > Export All Tilesets)',
+      T.HashTilesetNameFromArchive(hashed, hashed_data) == hashed)
+setSetting('TilesetExportNames', None)
 os.remove(os.path.join(course, '1-1.sarc'))
 renamed = SarcLib.SARC_Archive(T.RenameTilesetDX(yaz0.decompressFASTYZ(raw_exp), 'Pa1_1-1_3'))
 check('renaming a tileset archive changes the names inside it and keeps the tiles',

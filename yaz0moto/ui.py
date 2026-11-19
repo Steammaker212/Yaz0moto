@@ -626,6 +626,23 @@ def toolbarIconSize():
     return size if size in TOOLBAR_ICON_SIZES else 24
 
 
+def useNativeMenuBar():
+    """
+    Whether menus go in macOS's menu bar at the top of the screen (Preferences > General).
+    Off by default: Qt 5 often leaves that bar empty (no File, Edit, View or Help) until the
+    user switches to another app and back, e.g. when a dialog such as the first-run setup
+    opens before the main window, so the menus are in the window, as on Windows and Linux.
+    """
+    import sys
+    return sys.platform == 'darwin' and bool(setting('NativeMenuBar', False))
+
+
+def setupMenuBar(menubar):
+    """Puts a window's menu bar in the window, or in macOS's bar if that's chosen."""
+    menubar.setNativeMenuBar(useNativeMenuBar())
+    return menubar
+
+
 def GetIcon(name, big=False):
     """
     Helper function to grab a specific icon

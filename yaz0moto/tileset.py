@@ -1179,7 +1179,7 @@ def DeleteObject(idx, objNum, soft=False):
         exec("globals.Area.tileset%d = ''" % idx)
 
     # Remove the object from globals.ObjectAddedtoEmbedded
-    if folderIndex > -1 and globals.ObjectAddedtoEmbedded[globals.CurrentArea][folderIndex]:
+    if folderIndex > -1 and globals.ObjectAddedtoEmbedded.get(globals.CurrentArea, {}).get(folderIndex):
         globals.ObjectAddedtoEmbedded[globals.CurrentArea][folderIndex].pop(objAllIndex, None)
 
     # Subtract 1 from the objects' types that after this object and in the same slot
@@ -1448,18 +1448,7 @@ def SaveTileset(idx):
     name = eval('globals.Area.tileset%d' % idx)
     # if name == 'Pa%d_MIYAMOTO_TEMP' % idx:
     if idx > 0:
-        buffers = (tiledata, nmldata, colldata, deffile, indexfile)
-        buffers_data = b''.join(buffers)
-        buffers_hash = zlib.crc32(
-            buffers_data,
-            (idx << 24 |
-             idx << 16 |
-             idx << 8 |
-             idx)
-        )
-
-        # name = 'Pa%d_%08X%08X_%d' % (idx, buffers_hash, len(buffers_data), globals.Area.areanum)
-        name = 'Pa%d_%08X%08X' % (idx, buffers_hash, len(buffers_data))
+        name = HashTilesetName(idx, (tiledata, nmldata, colldata, deffile, indexfile))
         exec("globals.Area.tileset%d = name" % idx)
 
     if globals.IsNSMBUDX:
@@ -1895,6 +1884,52 @@ def GetTilesetArchiveData(name):
         data = yaz0.decompressFASTYZ(data)
 
     return data or None
+
+
+def HashTilesetName(slot, buffers):
+    """
+    The name Yaz0moto (like Miyamoto before it) gives a tileset it saves in slots 1-3:
+    Pa<slot>_<CRC32><size>, both 8 hex digits. buffers are what the tileset is made of, in
+    this order: the tile texture, the normal map (raw 2048x512 RGBA8 for Deluxe, GTX files
+    for the Wii U), the collision data (BG_chk), the object definitions and the object
+    index (BG_unt). The CRC32 starts from the slot number in all four bytes (0x01010101 for
+    slot 1), and the size is the total length of the buffers. So every change gets a new
+    name, the same tileset always gets the same one, and it fits the level's 32 byte field.
+    """
+    data = b''.join(buffers)
+    crc = zlib.crc32(data, slot << 24 | slot << 16 | slot << 8 | slot)
+    return 'Pa%d_%08X%08X' % (slot, crc, len(data))
+
+
+GENERATED_TILESET_NAME = r'^Pa[1-3]_[0-9A-F]{16}$'
+
+
+def HashTilesetNameFromArchive(name, data):
+    """
+    HashTilesetName for a tileset archive (uncompressed SARC bytes) called name, as the
+    tileset editor would compute it when saving it unchanged. None if it can't be read.
+    """
+    import re
+    match = re.match(r'^Pa([1-3])_', name or '')
+    if match is None:
+        return None
+    slot = int(match.group(1))
+    try:
+        arc = SarcLib.SARC_Archive(data)
+        coll = arc['BG_chk/d_bgchk_%s.bin' % name].data
+        deffile = arc['BG_unt/%s.bin' % name].data
+        indexfile = arc['BG_unt/%s_hd.bin' % name].data
+        if globals.IsNSMBUDX:
+            bntx = getTilesetBNTX(arc)
+            textures = []
+            for texname in (name, name + '_nml'):
+                image = loadTexFromBNTX(bntx, texname).convertToFormat(QtGui.QImage.Format_RGBA8888)
+                textures.append(image.constBits().asstring(image.byteCount()))
+        else:
+            textures = [arc['BG_tex/%s.gtx' % name].data, arc['BG_tex/%s_nml.gtx' % name].data]
+    except Exception:
+        return None
+    return HashTilesetName(slot, textures + [coll, deffile, indexfile])
 
 
 def getTilesetBNTX(arc):

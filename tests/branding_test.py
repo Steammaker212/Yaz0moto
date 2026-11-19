@@ -94,11 +94,15 @@ check('AppRun starts the Yaz0moto executable', '/Yaz0moto"' in read('buildtools/
 check('project.json id is Yaz0moto', 'Yaz0moto' in read('project.json'))
 
 # ---------------------------------------------------------------- updater and CI agree
-updater_src = read('yaz0moto/updater.py')
+# The update rules live in the updater program (yaz0moto_updater.py), which the editor imports
+updater_src = read('yaz0moto_updater.py')
 check('updater checks THIS project\'s releases', ("GITHUB_REPO = '%s'" % REPO) in updater_src
-      and 'Zenith-Team' not in updater_src)
+      and 'Zenith-Team' not in updater_src and 'Zenith-Team' not in read('yaz0moto/updater.py'))
 check('updater expects the executables the build produces',
       all(name in updater_src for name in ("'Yaz0moto.exe'", "Yaz0moto.app", "'Yaz0moto.AppImage'", "'Contents' / 'MacOS' / 'Yaz0moto'")))
+check('the build freezes the updater program into the package',
+      'build_updater.py' in read('build.py') and "'yaz0moto_updater'" in read('build.py')
+      and "target_name='Yaz0moto-Updater'" in read('build_updater.py'))
 
 workflows = {f: read('.github/workflows/' + f) for f in os.listdir('.github/workflows') if f.endswith('.yml')}
 artifacts = workflows['build-artifacts.yml']

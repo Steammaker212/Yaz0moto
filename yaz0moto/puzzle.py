@@ -24,7 +24,8 @@ Qt = QtCore.Qt
 
 from . import globals
 from . import misc
-from .modexport import NOT_NATIVE_WARNING, native_level, native_tileset_name
+from .modexport import (NOT_NATIVE_WARNING, TILESET_NAMES_INTERNAL, export_level, native_tileset_name,
+                        tilesetExportNames, warn_not_native)
 from .gtx import RAWtoGTX
 import SarcLib
 from .tileset import HandleTilesetEdited, loadGTX, writeGTX
@@ -608,9 +609,11 @@ class TilesetEditor(QtWidgets.QWidget):
 
     def saveTilesetAs(self):
         if globals.IsNSMBUDX:
-            # Export as a standalone Deluxe tileset: <name>.szs (Yaz0-compressed SARC)
+            # Export as a standalone Deluxe tileset: <name>.szs (Yaz0-compressed SARC), named
+            # as Preferences > Export tileset names says unless another name is typed
+            suggested, data = self.exportNameAndData()
             fn = QtWidgets.QFileDialog.getSaveFileName(
-                self.window, 'Export Deluxe tileset', self.exportName() + '.szs', 'NSMBUDX tileset files (*.szs)')[0]
+                self.window, 'Export Deluxe tileset', suggested + '.szs', 'NSMBUDX tileset files (*.szs)')[0]
             if fn == '': return
 
             fn = str(fn)
@@ -619,7 +622,7 @@ class TilesetEditor(QtWidgets.QWidget):
 
             name = os.path.splitext(os.path.basename(fn))[0]
             try:
-                WriteTilesetFileDX(name, self.saving(name), fn)
+                WriteTilesetFileDX(name, data if name == suggested else self.saving(name), fn)
             except ValueError as e:
                 QtWidgets.QMessageBox.warning(self.window, 'Export Error', str(e))
                 return
@@ -639,8 +642,13 @@ class TilesetEditor(QtWidgets.QWidget):
 
 
     def exportName(self):
-        """The name to export this tileset with: what the game calls it, if this is one of its levels."""
-        level = native_level(globals.mainWindow.fileTitle)
+        """
+        The name to export this tileset with (Preferences > Export tileset names): what the game
+        calls it in romfs/Unit if this is one of its levels, or the name the level uses for it.
+        """
+        if self.slot and tilesetExportNames() == TILESET_NAMES_INTERNAL:
+            return self.savingHashName()[0]
+        level = export_level(globals.mainWindow.fileTitle)
         return native_tileset_name(level, self.slot, globals.Area.areanum) if level and self.slot else self.name
 
     def saveBuffers(self):
@@ -685,18 +693,22 @@ class TilesetEditor(QtWidgets.QWidget):
 
 
     def savingHashName(self):
+        """(name, archive) with the name Yaz0moto gives saved tilesets (see HashTilesetName)."""
+        from .tileset import HashTilesetName
         buffers = self.saveBuffers()
-        buffers_data = b''.join(buffers)
-        buffers_hash = zlib.crc32(
-            buffers_data,
-            (self.slot << 24 |
-             self.slot << 16 |
-             self.slot << 8 |
-             self.slot)
-        )
-
-        name = 'Pa%d_%08X%08X' % (self.slot, buffers_hash, len(buffers_data))
+        name = HashTilesetName(self.slot, buffers)
         return name, self.savingWithBuffers(name, *buffers)
+
+    def exportNameAndData(self):
+        """
+        (name, archive) to export this tileset with, following Preferences > Export tileset
+        names: the game's romfs name for one of its levels (Pa1_1-1_3), or the internal name
+        Yaz0moto saves it with (Pa1_BD7694AD00800DD4). The main tileset keeps its name.
+        """
+        if self.slot and tilesetExportNames() == TILESET_NAMES_INTERNAL:
+            return self.savingHashName()
+        name = self.exportName()
+        return name, self.saving(name)
 
     def PackTexture(self, normalmap=False):
         tex = QtGui.QImage(2048, 512, QtGui.QImage.Format_RGBA8888)
@@ -5510,7 +5522,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def con(self): return self.tabs.currentWidget().con
 
     def setupMenus(self):
-        menubar = self.menuBar()
+        from .ui import setupMenuBar
+        menubar = setupMenuBar(self.menuBar())
         
         fileMenu = menubar.addMenu("&File")
         fileMenu.addAction("Import Tileset from file...", self.openTilesetfromFile, QtGui.QKeySequence.Open)
@@ -5546,7 +5559,7 @@ class MainWindow(QtWidgets.QMainWindow):
         Empty slots are skipped unless something was added to them.
         """
         title = globals.mainWindow.fileTitle
-        if globals.IsNSMBUDX and native_level(title) is None:
+        if warn_not_native(title):
             QtWidgets.QMessageBox.warning(self, 'Export All Tilesets', NOT_NATIVE_WARNING % title)
 
         folder = QtWidgets.QFileDialog.getExistingDirectory(
@@ -5559,20 +5572,24 @@ class MainWindow(QtWidgets.QMainWindow):
         for editor in self.editors:
             if editor.con and not editor.isDirty:
                 continue
-            name = editor.exportName()
-            if editor.con and name == editor.name:
-                name = 'Pa%d_new' % editor.slot
-            path = os.path.join(folder, name + ('.szs' if globals.IsNSMBUDX else '.sarc'))
+            name = None
             try:
+                name, data = editor.exportNameAndData()
+                if editor.con and name == editor.name:
+                    name = 'Pa%d_new' % editor.slot
+                    data = editor.saving(name)
+                path = os.path.join(folder, name + ('.szs' if globals.IsNSMBUDX else '.sarc'))
                 if globals.IsNSMBUDX:
-                    WriteTilesetFileDX(name, editor.saving(name), path)
+                    WriteTilesetFileDX(name, data, path)
                 else:
-                    yaz0.writeFile(path, editor.saving(name))
+                    yaz0.writeFile(path, data)
                 written.append(os.path.basename(path))
-                if editor.slot and native_level(globals.mainWindow.fileTitle):
+                # A renamed tileset only loads in the game if the level uses the new name
+                if (editor.slot and not editor.con and (tilesetExportNames() == TILESET_NAMES_INTERNAL
+                                                        or export_level(globals.mainWindow.fileTitle))):
                     tilesets.append((globals.Area, editor.slot, name))
             except (OSError, ValueError) as e:
-                failed.append('%s: %s' % (name, e))
+                failed.append('%s: %s' % (name or editor.name, e))
 
         message = 'Exported %d tileset(s) to:\n%s' % (len(written), folder)
         if written:
