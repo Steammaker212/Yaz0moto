@@ -131,6 +131,8 @@ jobs:
           ls -lh release_files/
 
       - name: Build release body
+        env:
+          MAC_NOTARIZED: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.APPLE_ID != '' && 'true' || 'false' }}
         run: |
           V="${{ needs.preflight.outputs.version }}"
           {
@@ -148,6 +150,10 @@ jobs:
             for f in release_files/*-Linux-x86_64*.zip; do
               [ -f "$f" ] && echo "| Linux x86_64 (zip) | \`$(basename "$f")\` |"
             done
+            if [ "${{ env.MAC_NOTARIZED }}" != "true" ]; then
+              echo ""
+              echo "**macOS:** the app isn't notarized by Apple yet, so the first time you open it macOS says it can't verify it. Click *Done*, then open **System Settings > Privacy & Security** and click **Open Anyway** next to Yaz0moto (once). Or run \`xattr -dr com.apple.quarantine /path/to/Yaz0moto.app\` in Terminal. Updates installed by Yaz0moto don't ask again."
+            fi
           } > release_body.md
           cat release_body.md
 

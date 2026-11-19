@@ -51,7 +51,7 @@ Get the latest build for your system from the [releases page](https://github.com
 | macOS (universal) | `Yaz0moto-v<version>-macOS-universal.zip` - unzip and open `Yaz0moto.app` |
 | Linux (x86_64) | `Yaz0moto-v<version>-Linux-x86_64.AppImage` (or the `.zip`) |
 
-The builds are not code-signed, so Windows SmartScreen or macOS Gatekeeper may warn you the first time; on macOS, right-click the app and choose *Open*.
+The builds are not code-signed, so Windows SmartScreen may warn you the first time (*More info > Run anyway*). On macOS, unless the release says it's notarized, macOS says it can't verify Yaz0moto the first time you open it: click *Done*, then open **System Settings > Privacy & Security** and click **Open Anyway** next to Yaz0moto (macOS 15 and later no longer offer *Open* in the right-click menu for this). Or run `xattr -dr com.apple.quarantine /path/to/Yaz0moto.app` in Terminal. You only do this once: updates installed by Yaz0moto itself don't ask again.
 
 ### Run from source
 To build and run Yaz0moto yourself, install the following prerequisites first:

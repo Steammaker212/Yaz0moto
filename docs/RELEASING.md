@@ -43,6 +43,26 @@ The build workflow runs `Yaz0moto-Updater version` on every platform: a package 
 can't update itself. A release should contain a build of its own version (not a nightly renamed), although
 the updater remembers the release it installed so it is not offered again.
 
+## macOS signing and notarization
+Without an Apple Developer account the macOS app is ad-hoc signed: it runs, but the first time someone opens a
+downloaded copy macOS says it can't verify it, and they have to allow it once in **System Settings > Privacy &
+Security > Open Anyway** (the release notes and README say how). Updates installed by Yaz0moto's updater don't ask.
+
+To have Apple notarize it, so it opens with no warning, join the Apple Developer Program, create a
+**Developer ID Application** certificate, and add these repository secrets (Settings > Secrets and variables >
+Actions). The macOS build signs with the hardened runtime, notarizes, staples the ticket and checks Gatekeeper
+accepts the app whenever `MACOS_CERTIFICATE` and `APPLE_ID` are set:
+
+| Secret | What |
+|---|---|
+| `MACOS_CERTIFICATE` | the Developer ID Application certificate and its private key exported as a `.p12`, base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PASSWORD` | the password given when exporting the `.p12` |
+| `APPLE_ID` | the Apple ID of the developer account |
+| `APPLE_TEAM_ID` | the 10-character team ID (Membership details) |
+| `APPLE_APP_PASSWORD` | an app-specific password for that Apple ID (account.apple.com > Sign-In and Security) |
+
+The hardened runtime exceptions the frozen app needs are in `buildtools/macos-entitlements.plist`.
+
 ## Pulling in changes from Pyamoto
 ```
 git remote add upstream https://github.com/Zenith-Team/Pyamoto.git   # once

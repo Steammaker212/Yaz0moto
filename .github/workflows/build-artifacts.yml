@@ -84,7 +84,18 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   build-macos:
     name: macOS Universal
-    runs-on: macos-14
+    # macos-14 is retired ("The configuration 'macos-14-arm64-us-default' is not supported")
+    runs-on: macos-15
+    env:
+      # Developer ID signing and notarization, used when these secrets are set (see
+      # docs/RELEASING.md). Without them the app is ad-hoc signed, and macOS asks users to
+      # confirm opening it the first time.
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      NOTARIZE: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.APPLE_ID != '' && 'true' || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -135,19 +146,66 @@ jobs:
 
       # Signing must be the last change to the bundle: anything moved inside it
       # afterwards breaks the signature, and macOS then calls the app damaged.
-      - name: Ad-hoc sign bundle
+      - name: Sign bundle
         run: |
+          if [ "$NOTARIZE" = "true" ]; then
+            # Developer ID: the certificate goes in a keychain of its own for this job
+            KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+            KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+            echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" \
+              -A -t cert -f pkcs12 -k "$KEYCHAIN"
+            rm -f "$RUNNER_TEMP/certificate.p12"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+            IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+            if [ -z "$IDENTITY" ]; then
+              echo "::error::MACOS_CERTIFICATE has no 'Developer ID Application' identity"
+              exit 1
+            fi
+            echo "Signing with: $IDENTITY"
+            # Notarization needs the hardened runtime and a secure timestamp on everything
+            SIGN=(--options runtime --timestamp --entitlements buildtools/macos-entitlements.plist --sign "$IDENTITY")
+          else
+            echo "No Developer ID secrets: ad-hoc signing (macOS asks users to confirm opening it once)"
+            SIGN=(--sign -)
+          fi
           # Libraries and helpers live in Contents/Resources, where codesign --deep doesn't
           # sign them, and the build changed them (install names, merged architectures).
           # macOS won't load a library whose signature is broken, so sign each one first.
           find build/Yaz0moto.app/Contents/Resources -type f -print0 |
             while IFS= read -r -d '' f; do
               if file -b "$f" | grep -q 'Mach-O'; then
-                codesign --force --sign - "$f"
+                codesign --force "${SIGN[@]}" "$f"
               fi
             done
-          codesign --force --deep --sign - build/Yaz0moto.app
+          codesign --force --deep "${SIGN[@]}" build/Yaz0moto.app
           codesign --verify --deep --strict --verbose=2 build/Yaz0moto.app
+
+      # Apple checks the signed app and issues a ticket, stapled to the app so Gatekeeper
+      # accepts it without asking, even offline. Stapling doesn't change the signature.
+      - name: Notarize
+        if: env.NOTARIZE == 'true'
+        run: |
+          ditto -c -k --keepParent build/Yaz0moto.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --wait --timeout 45m --output-format json > notary.json || true
+          cat notary.json
+          STATUS="$(python3 -c "import json; print(json.load(open('notary.json')).get('status', ''))" 2>/dev/null || true)"
+          if [ "$STATUS" != "Accepted" ]; then
+            ID="$(python3 -c "import json; print(json.load(open('notary.json')).get('id', ''))" 2>/dev/null || true)"
+            if [ -n "$ID" ]; then
+              xcrun notarytool log "$ID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" || true
+            fi
+            echo "::error::Notarization was not accepted (status: ${STATUS:-none})"
+            exit 1
+          fi
+          xcrun stapler staple build/Yaz0moto.app
+          xcrun stapler validate build/Yaz0moto.app
 
       # -y stores the bundle's symlinks as symlinks. Without it zip copies what they
       # point to, which changes the signed bundle and breaks its signature.
@@ -167,6 +225,14 @@ jobs:
           echo "$INFO" | grep -q x86_64
           echo "$INFO" | grep -q arm64
           echo "Symlinks kept in the bundle: $(find "$CHECK/Yaz0moto.app" -type l | wc -l)"
+
+          # What Gatekeeper will say to people who download it
+          if [ "$NOTARIZE" = "true" ]; then
+            spctl --assess --type execute --verbose=2 "$CHECK/Yaz0moto.app"
+            xcrun stapler validate "$CHECK/Yaz0moto.app"
+          else
+            echo "::notice::macOS build is ad-hoc signed, not notarized: Gatekeeper asks users to confirm opening it the first time. Add the Developer ID secrets (docs/RELEASING.md) to notarize it."
+          fi
 
           # The updater (signed above with the rest of the bundle) must run on its own
           UPDATER="$CHECK/Yaz0moto.app/Contents/Resources/updater/Yaz0moto-Updater"
