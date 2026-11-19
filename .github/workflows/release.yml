@@ -17,7 +17,8 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   preflight:
     name: Preflight checks
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: Python 3.9 (what the builds use) has no build for Ubuntu 26.04
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
 

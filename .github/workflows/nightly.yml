@@ -31,7 +31,8 @@ jobs:
   preflight:
     name: Preflight checks
     if: github.ref == 'refs/heads/deluxe-support'
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: Python 3.9 (what the builds use) has no build for Ubuntu 26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
