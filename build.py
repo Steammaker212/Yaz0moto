@@ -15,8 +15,8 @@ from yaz0moto.globals import MiyamotoVersion
 import os, os.path, platform, shutil, sys
 
 # Set architectures for universal build on macOS.
-# CI overrides ARCHFLAGS per-runner (arm64 or x86_64) then lipo-merges.
-# Local builds without ARCHFLAGS set default to universal.
+# macOS builds are universal (x86_64 + arm64): CI builds with a universal2 Python and
+# buildtools/make_universal.py adds the other half of single-architecture wheels.
 if sys.platform == 'darwin':
     if 'ARCHFLAGS' not in os.environ:
         os.environ["ARCHFLAGS"] = "-arch x86_64 -arch arm64"
@@ -165,11 +165,12 @@ include_files = [
 ]
 # (source, target): a bare 'tools/win' would land at win/, but tileset.writeGTX
 # looks for nvcompress in tools/<platform>/
-if sys.platform == 'darwin':
-    include_files.append(('tools/mac', 'tools/mac'))
-elif sys.platform == 'win32':
+# macOS needs none: writeGTX compresses textures itself there, and tools/mac only holds a
+# 32-bit Intel program that no Mac has run since macOS 10.15 (it would also keep the app
+# from being universal and notarized)
+if sys.platform == 'win32':
     include_files.append(('tools/win', 'tools/win'))
-else:
+elif sys.platform != 'darwin':
     include_files.append(('tools/linux', 'tools/linux'))
 
 # Set it up
