@@ -47,6 +47,7 @@ jobs:
           $d = Get-Content project.json | ConvertFrom-Json
           $d | Add-Member -NotePropertyName release_type -NotePropertyValue ${{ inputs.release_type }} -Force
           $d | Add-Member -NotePropertyName version -NotePropertyValue $v -Force
+          $d | Add-Member -NotePropertyName build_date -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")) -Force
           $d | ConvertTo-Json | Set-Content project.json
 
       - name: Build
@@ -124,7 +125,7 @@ jobs:
 
       - name: Inject metadata
         run: |
-          python3 -c "import json,sys; d=json.load(open('project.json')); d['release_type']=sys.argv[1]; d['version']=sys.argv[2]; open('project.json','w').write(json.dumps(d,indent=4))" \
+          python3 -c "import json,sys; d=json.load(open('project.json')); import datetime; d['release_type']=sys.argv[1]; d['version']=sys.argv[2]; d['build_date']=datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'); open('project.json','w').write(json.dumps(d,indent=4))" \
             "${{ inputs.release_type }}" "${{ inputs.version }}"
 
       - name: Build universal Cython extensions + .app
@@ -321,7 +322,7 @@ jobs:
 
       - name: Inject metadata
         run: |
-          python3 -c "import json,sys; d=json.load(open('project.json')); d['release_type']=sys.argv[1]; d['version']=sys.argv[2]; open('project.json','w').write(json.dumps(d,indent=4))" \
+          python3 -c "import json,sys; d=json.load(open('project.json')); import datetime; d['release_type']=sys.argv[1]; d['version']=sys.argv[2]; d['build_date']=datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'); open('project.json','w').write(json.dumps(d,indent=4))" \
             "${{ inputs.release_type }}" "${{ inputs.version }}"
 
       - name: Build

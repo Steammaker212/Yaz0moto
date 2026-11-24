@@ -85,6 +85,7 @@ class ReleaseInfo:
     page_url: str
     body: str
     assets: tuple
+    published: str = ''  # when GitHub published it, e.g. 2026-11-01T23:36:10Z
 
 
 # ------------------------------------------------------------------------------- GitHub
@@ -169,6 +170,7 @@ def release_from_json(data, channel):
         page_url=str(data.get('html_url') or f'{RELEASES_URL}/tag/{tag}'),
         body=str(data.get('body') or ''),
         assets=valid_assets,
+        published=str(data.get('published_at') or data.get('created_at') or ''),
     )
 
 
@@ -206,12 +208,14 @@ def numeric_version(value):
     return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
 
 
-def is_newer(release, current_version, current_type='release', installed_tag=None):
+def is_newer(release, current_version, current_type='release', installed_tag=None, build_date=None):
     """
     Whether a release should be offered to an installation of current_version.
     installed_tag is the release the updater last installed here: a release can ship a
     build whose own version isn't its tag (a nightly published as v1.2.0, say), which
     would otherwise be offered again after every update.
+    build_date is when this build was made (UTC, ISO 8601): a nightly build is only offered
+    releases published after it, never an older release (that would be a downgrade).
     """
     current = str(current_version)
     if installed_tag and release.tag.lower() == str(installed_tag).lower():
@@ -228,7 +232,11 @@ def is_newer(release, current_version, current_type='release', installed_tag=Non
         installed += (0,) * (length - len(installed))
         return latest > installed
     if current_type == 'nightly':
-        # A nightly build has no version number to compare with: a release is newer
+        # A nightly build has no version number to compare with: a release published after
+        # it was built is newer, an older one is not (when either date is unknown, offer it)
+        published = getattr(release, 'published', '') or ''
+        if build_date and published:
+            return published > str(build_date)
         return True
     return release.version.lstrip('vV') != current.lstrip('vV')
 

@@ -1837,6 +1837,115 @@ def _patch_slug_from_url(url, fallback='mod'):
     return re.sub(r'[^\w\-]', '_', name).strip('_') or 'mod'
 
 
+class BackgroundPreviewGroup(QtWidgets.QGroupBox):
+    """
+    Preferences for how zone backgrounds (the live background and "Render Background
+    Preview") line up with the level, on Wii U and Deluxe
+    """
+
+    def __init__(self):
+        super().__init__('Background Preview')
+        from .dvrender import viewOptionsFromSettings
+        options = viewOptionsFromSettings(setting)
+
+        self.framing = QtWidgets.QComboBox()
+        self.framing.addItem('Level scale (like in game)', False)
+        self.framing.addItem('Fill the view (one game screen fills the editor)', True)
+        self.framing.setCurrentIndex(1 if options.fillView else 0)
+        self.framing.setToolTip(
+            '<b>Level scale</b>: the game\'s screen is drawn at the size of the level, so the background '
+            'lines up with the terrain the way it does in game; around it, the same camera shows more.<br>'
+            '<b>Fill the view</b>: the picture of one game screen is stretched over the editor\'s view, '
+            'whatever the zoom (like Miyamoto-Next).')
+
+        self.gameCamera = QtWidgets.QCheckBox('Keep the camera inside the zone, like the game')
+        self.gameCamera.setChecked(options.gameCamera)
+        self.gameCamera.setToolTip(
+            'The game never lets its screen go past the zone\'s edges, so near the zone\'s bottom the '
+            'background stays where it is when the screen touches the bottom. When off, the camera '
+            'follows the middle of the editor\'s view anywhere inside the zone (the background then '
+            'sits higher than in game when you look at the bottom of the zone).')
+
+        def offsetBox(value):
+            box = QtWidgets.QSpinBox()
+            box.setRange(-2048, 2048)
+            box.setSingleStep(8)
+            box.setSuffix(' px')
+            box.setValue(int(round(value)))
+            box.setToolTip('In level units (16 per tile). Only changes the preview, never the level.')
+            return box
+
+        self.offsetX = offsetBox(options.offsetX)
+        self.offsetY = offsetBox(options.offsetY)
+
+        offsets = QtWidgets.QHBoxLayout()
+        offsets.addWidget(QtWidgets.QLabel('Right:'))
+        offsets.addWidget(self.offsetX)
+        offsets.addWidget(QtWidgets.QLabel('Down:'))
+        offsets.addWidget(self.offsetY)
+        reset = QtWidgets.QPushButton('Reset')
+        reset.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        reset.clicked.connect(lambda: (self.offsetX.setValue(0), self.offsetY.setValue(0)))
+        offsets.addWidget(reset)
+        offsets.addStretch(1)
+
+        # Mods only ship the backgrounds they change; the game takes the others from
+        # the base game, so the editor needs to know where that is
+        from .gamedefs import DistantViewFallbackSetting
+        self.fallbacks = {}
+        fallbackRows = []
+        for isDX, label, hint in (
+                (False, 'Wii U base game:', 'The original game\'s "content" folder (or content/Common/distant_view)'),
+                (True, 'Deluxe base game:', 'The original game\'s "romfs" folder (or romfs/Model)')):
+            edit = QtWidgets.QLineEdit(str(setting(DistantViewFallbackSetting(isDX), '') or ''))
+            edit.setPlaceholderText(hint)
+            edit.setToolTip(
+                'Where to find the backgrounds a mod doesn\'t include. A mod\'s folder only has the '
+                'backgrounds it changed; in game the others come from the base game, so without this '
+                'zones using them show no background. ' + hint + '.')
+            browse = QtWidgets.QPushButton('Browse...')
+            browse.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+            browse.clicked.connect(lambda _=False, edit=edit, label=label: self._browse(edit, label))
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(edit, 1)
+            row.addWidget(browse)
+            self.fallbacks[isDX] = edit
+            fallbackRows.append((label, row))
+
+        form = QtWidgets.QFormLayout()
+        form.addRow('Framing:', self.framing)
+        form.addRow(self.gameCamera)
+        form.addRow('Extra offset:', offsets)
+        for label, row in fallbackRows:
+            form.addRow(label, row)
+        self.setLayout(form)
+
+    def _browse(self, edit, label):
+        path = QtWidgets.QFileDialog.getExistingDirectory(self, label.rstrip(':'), edit.text())
+        if path:
+            edit.setText(path)
+
+    def save(self):
+        """
+        Saves the settings; returns whether any of them changed
+        """
+        from .dvrender import viewOptionsFromSettings
+        from .gamedefs import DistantViewFallbackSetting
+
+        def current():
+            return (viewOptionsFromSettings(setting).key(),
+                    tuple(str(setting(DistantViewFallbackSetting(isDX), '') or '') for isDX in (False, True)))
+
+        before = current()
+        setSetting('BgPreviewFillView', bool(self.framing.currentData()))
+        setSetting('BgPreviewGameCamera', self.gameCamera.isChecked())
+        setSetting('BgPreviewOffsetX', self.offsetX.value())
+        setSetting('BgPreviewOffsetY', self.offsetY.value())
+        for isDX, edit in self.fallbacks.items():
+            setSetting(DistantViewFallbackSetting(isDX), edit.text().strip())
+        return current() != before
+
+
 class PreferencesDialog(QtWidgets.QDialog):
     """
     Dialog which lets you customize Miyamoto
@@ -2138,10 +2247,19 @@ class PreferencesDialog(QtWidgets.QDialog):
                 tileset_group.setLayout(ts_lay)
                 vbox.addWidget(tileset_group)
 
+                # ── Background preview section ───────────────────────────────
+                self.backgroundPreview = BackgroundPreviewGroup()
+                vbox.addWidget(self.backgroundPreview)
+
                 vbox.addStretch(1)
                 self.setLayout(vbox)
 
         return GeneralTab()
+
+    @property
+    def backgroundTab(self):
+        """The Background Preview settings (in the General tab)"""
+        return self.generalTab.backgroundPreview
 
     def getTilesetsTab(self):
         return self.generalTab  # merged into getGeneralTab

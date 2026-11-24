@@ -62,7 +62,8 @@ def _user_agent():
 
 
 def _default_channel():
-    return CHANNEL_RELEASE
+    # A nightly build follows the nightlies: the latest release is usually older than it
+    return CHANNEL_NIGHTLY if globals.MiyamotoReleaseType == 'nightly' else CHANNEL_RELEASE
 
 
 def _setting(name, default=None):
@@ -107,7 +108,8 @@ def _installed_tag():
 
 
 def _is_newer(release):
-    return core.is_newer(release, globals.MiyamotoVersion, globals.MiyamotoReleaseType, _installed_tag())
+    return core.is_newer(release, globals.MiyamotoVersion, globals.MiyamotoReleaseType, _installed_tag(),
+                         getattr(globals, 'MiyamotoBuildDate', None))
 
 
 def _asset_for_platform(release, system=None, machine=None, appimage=None):

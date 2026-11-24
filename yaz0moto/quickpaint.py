@@ -38,6 +38,7 @@ from . import gametilesets
 from .misc import setting, setSetting
 
 MODE_OFF, MODE_PAINT, MODE_SLOPE, MODE_ERASE = 'off', 'paint', 'slope', 'erase'
+MODE_SHAPE = 'shape'  # terrain drawn as an editable outline of points (qpshapes.py)
 
 PRESET_VERSION = 2  # 1: inner corners were laid out mirrored in the panel (see load_presets)
 
@@ -544,6 +545,31 @@ def _pick(votes, min_share=0.3):
     return out
 
 
+def _fill_gaps(roles, votes, get_def):
+    """
+    Parts left without an object get the one used most in their place that no other part
+    has, if it's a single tile. Nintendo's levels often cover inner corners with the fill
+    object, so their real inner corner pieces are used too rarely to win the vote.
+    """
+    assigned = {tuple(v) for v in roles.values() if v}
+    for role in OUTER_ROLES + INNER_ROLES:
+        if roles.get(role):
+            continue
+        best = None
+        for key, n in votes.get(role, {}).items():
+            definition = get_def(key)
+            if key in assigned or definition is None or is_diagonal(definition):
+                continue
+            if (definition.width, definition.height) != (1, 1):
+                continue
+            if best is None or n > best[0]:
+                best = (n, key)
+        if best is not None:
+            roles[role] = list(best[1])
+            assigned.add(best[1])
+    return roles
+
+
 def learn_roles(objects, get_def=None, slot=None, min_share=0.0):
     """
     A preset's parts from existing terrain: for each part, the object most used for it.
@@ -553,7 +579,8 @@ def learn_roles(objects, get_def=None, slot=None, min_share=0.0):
     get_def = get_def or global_def
     objects = [obj for obj in objects if slot is None or obj.tileset == slot]
     slopes = [obj for obj in objects if is_diagonal(get_def(obj_key(obj)))]
-    roles = _pick(_layer_votes(objects, None, get_def), min_share)
+    votes = _layer_votes(objects, None, get_def)
+    roles = _fill_gaps(_pick(votes, min_share), votes, get_def)
     slope_votes = defaultdict(Counter)
     for obj in slopes:
         role = slope_role_for(get_def(obj_key(obj)))
@@ -609,7 +636,7 @@ def learn_from_layers(layers, slot, get_def=None):
         used.update(obj_key(obj) for obj in layer if obj.tileset == slot)
         for role, counter in _layer_votes(layer, slot, get_def).items():
             votes[role].update(counter)
-    roles = _pick(votes)
+    roles = _fill_gaps(_pick(votes), votes, get_def)
     roles.update(find_slopes(slot, get_def, used))
     return roles
 
@@ -781,8 +808,10 @@ def load_presets():
     out, migrated = [], False
     for preset in presets:
         if isinstance(preset, dict) and isinstance(preset.get('name'), str):
+            # Parts are (tileset slot, object) or Game tab objects, ['game', tileset key, object]
             roles = {role: list(value) for role, value in (preset.get('roles') or {}).items()
-                     if role in ROLES and isinstance(value, (list, tuple)) and len(value) == 2}
+                     if role in ROLES and isinstance(value, (list, tuple))
+                     and (len(value) == 2 or gametilesets.is_ref(value))}
             entry = {'name': preset['name'], 'roles': roles, 'version': preset.get('version', 1)}
             if isinstance(preset.get('tileset'), str):
                 entry['tileset'] = preset['tileset']
@@ -797,6 +826,22 @@ def save_presets(presets):
     for preset in presets:
         preset['version'] = PRESET_VERSION
     setSetting('QuickPaintPresets', presets)
+
+
+def tileset_bound(preset):
+    """Whether a preset uses objects of a level tileset (slot 1 to 3), which differ from tileset to tileset."""
+    return any(value and not gametilesets.is_ref(value) and len(value) == 2 and value[0] in (1, 2, 3)
+               for value in preset.get('roles', {}).values())
+
+
+def mismatched(preset):
+    """The tileset a preset was made for, if the open area doesn't use it (its parts would be other objects there)."""
+    if preset is None or globals.Area is None or not tileset_bound(preset):
+        return None
+    name = preset.get('tileset')
+    if name and name not in tuple(area_tileset(slot) for slot in range(1, 4)):
+        return name
+    return None
 
 
 def preset_slot(roles):
@@ -944,7 +989,7 @@ class QuickPaintPanel(QtWidgets.QWidget):
         self.mode = MODE_OFF
         # The mode last used comes back when the panel shows (also when Yaz0moto starts with it open)
         last = setting('QuickPaintMode', MODE_PAINT)
-        self.pendingMode = last if last in (MODE_PAINT, MODE_SLOPE, MODE_ERASE) else None
+        self.pendingMode = last if last in (MODE_PAINT, MODE_SLOPE, MODE_SHAPE, MODE_ERASE) else None
         self.presets = load_presets()
         self._seenTilesets = None
 
@@ -957,7 +1002,8 @@ class QuickPaintPanel(QtWidgets.QWidget):
         self.modeGroup.setExclusive(True)
         modeRow = QtWidgets.QHBoxLayout()
         self.modeButtons = {}
-        for mode, text in ((MODE_OFF, 'Off'), (MODE_PAINT, 'Paint'), (MODE_SLOPE, 'Slope'), (MODE_ERASE, 'Erase')):
+        for mode, text in ((MODE_OFF, 'Off'), (MODE_PAINT, 'Paint'), (MODE_SLOPE, 'Slope'), (MODE_SHAPE, 'Shape'),
+                           (MODE_ERASE, 'Erase')):
             button = QtWidgets.QToolButton()
             button.setText(text)
             button.setCheckable(True)
@@ -1108,6 +1154,23 @@ class QuickPaintPanel(QtWidgets.QWidget):
         self.slopeFill.currentIndexChanged.connect(lambda i: setSetting('QuickPaintSlopeFill', self.slopeFill.currentData()))
         options.addRow('Under it:', self.slopeFill)
         outer.addWidget(slopes)
+
+        # Shapes (the Shape mode): terrain kept as an outline of points that stays editable
+        shapesBox = QtWidgets.QGroupBox('Shapes')
+        shapesLayout = QtWidgets.QVBoxLayout(shapesBox)
+        shapeButtons = QtWidgets.QHBoxLayout()
+        from . import qpshapes
+        for text, tip, slot in (
+                ('Delete', 'Delete the selected shape and its terrain', qpshapes.delete_selected),
+                ('Re-tile', 'Place the selected shape again with this preset', qpshapes.retile_selected),
+                ('Unlink', 'Stop keeping the selected shape as a shape: its objects stay as ordinary objects',
+                 qpshapes.forget_selected)):
+            button = QtWidgets.QPushButton(text)
+            button.setToolTip(tip)
+            button.clicked.connect(lambda checked=False, f=slot: f())
+            shapeButtons.addWidget(button)
+        shapesLayout.addLayout(shapeButtons)
+        outer.addWidget(shapesBox)
 
         # Editing terrain that's already placed
         edit = QtWidgets.QGroupBox('Placed terrain')
@@ -1366,11 +1429,25 @@ class QuickPaintPanel(QtWidgets.QWidget):
             return
         self._seenTilesets = names
         current = self.preset()
-        if current is not None and (not current.get('tileset') or current['tileset'] in names):
+        if current is not None and not mismatched(current):
             return
         match = next((p for p in self.presets if p.get('tileset') in names[1:] and p.get('tileset')), None)
         if match is not None:
             self.fillPresetBox(match['name'])
+            if current is not None:
+                self.say('this level uses tileset %s, so Quick Paint switched to its preset "%s" ("%s" is for %s).'
+                         % (match['tileset'], match['name'], current['name'], current.get('tileset')))
+            return
+        if current is None:
+            return
+        # A preset made for another tileset would paint with whatever objects have its numbers
+        # here: learn one for this tileset from the level instead (the old one stays in the list)
+        made = self.autoDetect()
+        if made is not None:
+            self.fillPresetBox(made['name'])
+            self.say('this level uses tileset %s, not %s: Quick Paint made the preset "%s" for it from the level '
+                     '("%s" is still in the list).' % (made.get('tileset'), current.get('tileset'), made['name'],
+                                                       current['name']))
 
     def refresh(self):
         """Redraws the parts (after a preset or the tilesets change)."""
@@ -1442,8 +1519,16 @@ class QuickPaintPanel(QtWidgets.QWidget):
                     MODE_PAINT: 'Right drag paints terrain, Shift + right drag fills a rectangle. Left click selects as usual',
                     MODE_SLOPE: 'Right drag a line along the ground\'s surface, or right click points one after another: '
                                 'each part of the line becomes a slope at the closest angle, joined at the dots',
-                    MODE_ERASE: 'Right drag erases terrain (and slopes), Shift + right drag clears a rectangle'}
-            text = ('<b>Paint</b>: right drag paints, Shift + right drag fills a rectangle. <b>Erase</b>: right drag '
+                    MODE_ERASE: 'Right drag erases terrain (and slopes), Shift + right drag clears a rectangle',
+                    MODE_SHAPE: 'Right click points around a shape (flat, straight up or along a slope) and right click '
+                                'the first point to fill it. Drag its points or its inside to change it afterwards'}
+            shape = ('<b>Shape</b>: right click nodes around a shape, then the first node again (or Enter, Esc or '
+                     'double-click) to fill it with terrain and slopes. Then drag a node (left or right) anywhere to '
+                     'reshape it (sides at other angles are built from the nearest slopes), drag inside to move it. '
+                     '<b>Add a node</b>: drag the + in the middle of a side, or double-click a side. <b>Remove a node</b>: '
+                     'click it and press Delete, double-click it, or Shift + click it. <b>Delete a shape</b>: click inside '
+                     'it and press Delete. ')
+            text = (shape + '<b>Paint</b>: right drag paints, Shift + right drag fills a rectangle. <b>Erase</b>: right drag '
                     'erases. <b>Slope</b>: right drag a line along the ground\'s surface, or right click point after point: '
                     'each part becomes a slope at the closest angle (with flat ground for level parts), joined at the dots. '
                     'Start on a dot to go on from it; double-click or Esc ends the line. Left click selects and moves '
@@ -1453,8 +1538,15 @@ class QuickPaintPanel(QtWidgets.QWidget):
                     MODE_PAINT: 'Left drag paints terrain, right drag erases it, Shift + drag fills a rectangle',
                     MODE_SLOPE: 'Drag a line along the ground\'s surface, or click points one after another: each part of '
                                 'the line becomes a slope at the closest angle, joined at the dots. Right drag erases',
-                    MODE_ERASE: 'Left drag erases terrain (and slopes), right drag paints it'}
-            text = ('<b>Paint</b>: left drag paints, right drag erases, Shift + drag fills or clears a rectangle. '
+                    MODE_ERASE: 'Left drag erases terrain (and slopes), right drag paints it',
+                    MODE_SHAPE: 'Click points around a shape (flat, straight up or along a slope) and click the first point '
+                                'to fill it. Drag its points or its inside to change it afterwards'}
+            shape = ('<b>Shape</b>: click nodes around a shape, then the first node again (or Enter, Esc or '
+                     'double-click) to fill it with terrain and slopes. Then drag a node anywhere to reshape it (sides at '
+                     'other angles are built from the nearest slopes), drag inside to move it. <b>Add a node</b>: drag the '
+                     '+ in the middle of a side, or double-click a side. <b>Remove a node</b>: click it and press Delete, '
+                     'double-click it, or right click it. <b>Delete a shape</b>: click inside it and press Delete. ')
+            text = (shape + '<b>Paint</b>: left drag paints, right drag erases, Shift + drag fills or clears a rectangle. '
                     '<b>Slope</b>: drag a line along the ground\'s surface, or click point after point: each part becomes '
                     'a slope at the closest angle (with flat ground for level parts), joined at the dots. Start on a dot '
                     'to go on from it; double-click or Esc ends the line.')
@@ -1540,6 +1632,17 @@ def strokeButtons():
     Miyamoto's Quick Paint), so left click still selects.
     """
     return (Qt.RightButton,) if globals.LegacyMouseControls else (Qt.LeftButton, Qt.RightButton)
+
+
+def shapeButton(view, event):
+    """
+    Whether a click goes to Shape mode: left or right click; with Legacy mouse controls (where
+    left click selects) a left click only on a shape or while one is drawn, so nodes can be dragged.
+    """
+    from . import qpshapes
+    if event.button() in strokeButtons():
+        return True
+    return event.button() == Qt.LeftButton and qpshapes.claims(view, event)
 
 
 def refreshPanel():
@@ -1835,9 +1938,11 @@ def _updateGhost(corner):
 
 
 def cancel():
-    """Esc in Slope mode: ends the line being drawn. Returns whether there was one."""
+    """Esc: ends the line of slopes or the shape being drawn. Returns whether there was one."""
     global _stroke, _ghost
+    from . import qpshapes
     had = _stroke is not None or bool(_chain.dots)
+    had = qpshapes.cancel() or had
     _stroke = None
     _ghost = None
     _preview.clear()
@@ -1866,12 +1971,18 @@ def handlePress(view, event):
         return False
     button = event.button()
     modifiers = QtWidgets.QApplication.keyboardModifiers()
-    if button not in strokeButtons() or event.buttons() != button:
-        return False
     if button == Qt.RightButton and modifiers & Qt.ControlModifier:
         return False  # the zone menu
-    event.accept()
     mode = _panel.mode
+    if mode == MODE_SHAPE:
+        from . import qpshapes
+        if event.buttons() != button or not shapeButton(view, event):
+            return False
+        event.accept()
+        return qpshapes.press(view, event) if _panel.ready(mode) else True
+    if button not in strokeButtons() or event.buttons() != button:
+        return False
+    event.accept()
     if button == Qt.RightButton and not globals.LegacyMouseControls:
         mode = MODE_PAINT if mode == MODE_ERASE else MODE_ERASE
     if not _panel.ready(mode):
@@ -1899,7 +2010,12 @@ def handleDoubleClick(view, event):
     A double-click while Quick Paint is on: in Slope mode it ends the line (the first click
     already added its point); otherwise it paints like a press. Returns whether it was used.
     """
-    if not isActive() or globals.Area is None or event.button() not in strokeButtons():
+    if not isActive() or globals.Area is None:
+        return False
+    if _panel.mode == MODE_SHAPE:
+        from . import qpshapes
+        return qpshapes.double_click(view, event) if shapeButton(view, event) else False
+    if event.button() not in strokeButtons():
         return False
     if _panel.mode == MODE_SLOPE and not (event.button() == Qt.RightButton and not globals.LegacyMouseControls):
         event.accept()
@@ -1917,6 +2033,9 @@ def handleMove(view, event):
             _hover = None
             view.viewport().update()
         return False
+    if _panel.mode == MODE_SHAPE:
+        from . import qpshapes
+        return qpshapes.move(view, event)
     global _hoverCorner
     if _stroke is not None and _stroke.mode == MODE_SLOPE:
         corner, _ = _cornerAt(view, event.pos())
@@ -1947,6 +2066,9 @@ def handleMove(view, event):
 
 def handleRelease(view, event):
     global _stroke
+    if isActive() and _panel.mode == MODE_SHAPE:
+        from . import qpshapes
+        return qpshapes.release(view, event) if (qpshapes._s.drag is not None or shapeButton(view, event)) else False
     if _stroke is None:
         return isActive() and event.button() in strokeButtons()
     stroke, _stroke = _stroke, None
@@ -1988,6 +2110,8 @@ def _finishSlope(stroke, remove, add):
 
 def handleLeave(view):
     global _hover, _hoverCorner, _ghost
+    from . import qpshapes
+    qpshapes.leave(view)
     if _hover is not None or _ghost is not None or _hoverCorner is not None:
         _hover = _hoverCorner = _ghost = None
         view.viewport().update()
@@ -2032,6 +2156,11 @@ def drawOverlay(painter, rect):
                 if x > right or y > bottom or x + w < left or y + h < top:
                     continue
                 _drawPlanned(painter, planned, tile, visible)
+
+        if _panel.mode == MODE_SHAPE:
+            from . import qpshapes
+            qpshapes.draw(painter, rect, tile, tiles)
+            return
 
         dashed = QtGui.QPen(QtGui.QColor(255, 140, 0, 220), 2, Qt.DashLine)
         dashed.setCosmetic(True)

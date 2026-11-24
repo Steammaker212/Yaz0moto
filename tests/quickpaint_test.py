@@ -311,6 +311,12 @@ check('steep and 45-degree pieces join too', s_corners == [(0, 20), (2, 16), (6,
 fake = [types.SimpleNamespace(obj=DEFS[(1, 4)]), types.SimpleNamespace(obj=DEFS2[(1, 62)]), types.SimpleNamespace(obj=DEFS[(1, 17)])]
 check('Find Slopes on a game tileset names its slope objects (the usual shape first)',
       qp.find_game_slopes('unit:X', fake) == {'slope1_floorUp': ['game', 'unit:X', 2]})
+with mock.patch.object(qp, 'setting', lambda name, default=None: [{'name': 'G', 'version': 2, 'roles': {
+        'center': ['game', 'pack:C:/Objects/Main', 4], 'top': [1, 10], 'left': ['bad'], 'nope': [1, 2]}}]
+        if name == 'QuickPaintPresets' else default), mock.patch.object(qp, 'setSetting', lambda *a: None):
+    loaded = qp.load_presets()
+check('presets keep parts from the Game tab when they are loaded again (and drop broken ones)',
+      loaded[0]['roles'] == {'center': ['game', 'pack:C:/Objects/Main', 4], 'top': [1, 10]})
 check('every part, the steep slopes too, has a picture for its button',
       all(not qp.role_diagram(role, 32).isNull() for role in qp.ROLES))
 
@@ -426,6 +432,19 @@ with mock.patch.object(items.ObjectItem, 'updateObjCache', lambda self: None), \
         qp.apply_terrain(1, {'center': ['game', 'unit:Pa1_6-1_1', 99]}, paint=qp.rect_cells(40, 30, 2, 2))
         check('if a game object doesn\'t fit in the level\'s tilesets nothing is placed',
               len(layer) == n1 and len(globals.UndoManager.undo_stack) == steps)
+
+print('-- a preset made for another tileset')
+globals.Area.tileset1 = 'Pa1_1-1_1'
+mixed = {'name': 'Terrain', 'tileset': 'Pa1_1-2_1',
+         'roles': {'center': ['game', 'pack:x', 4], 'top': [1, 6], 'left': [1, 9]}}
+check('a preset with level-tileset parts is tied to its tileset', qp.tileset_bound(mixed))
+check('one with only game parts is not', not qp.tileset_bound({'roles': {'center': ['game', 'pack:x', 4]}}))
+check('it is mismatched in an area using another tileset', qp.mismatched(mixed) == 'Pa1_1-2_1')
+globals.Area.tileset1 = 'Pa1_1-2_1'
+check('...and not in one using its own', qp.mismatched(mixed) is None)
+check('game-only presets are never mismatched',
+      qp.mismatched({'tileset': 'Pa1_9-9_9', 'roles': {'center': ['game', 'pack:x', 4]}}) is None)
+del globals.Area.tileset1
 
 failed = [label for label, ok in results if not ok]
 print('\n%d/%d passed' % (len(results) - len(failed), len(results)))

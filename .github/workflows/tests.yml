@@ -8,6 +8,7 @@ name: Tests
 #   - updater_test.py:      the updater program: release files, download/unpack, install, keeping user files, rollback
 #   - quickpaint_test.py:   Quick Paint terrain: parts, merging, painting/erasing next to terrain, undo
 #   - gametilesets_test.py: the palette's Game tab: listing every tileset, objects, packs, copying into a level
+#   - qpshapes_test.py:     Quick Paint's Shape mode: outlines of nodes, sides at any angle, editing, saving
 #   - make_universal_test.py: making every binary of the macOS app universal (arm64 + x86_64)
 
 on:
@@ -76,6 +77,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tests/gametilesets_test.py
+
+      - name: Quick Paint shapes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tests/qpshapes_test.py
 
       - name: macOS universal app tool
         run: python tests/make_universal_test.py

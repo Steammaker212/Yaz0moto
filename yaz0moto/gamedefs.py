@@ -25,6 +25,56 @@ from .misc import setting, setSetting
 #################################
 
 
+def DistantViewFallbackSetting(isDX):
+    """
+    The setting holding the base game folder backgrounds fall back to, per platform
+    """
+    return 'BgFallbackFolder_NSMBUDX' if isDX else 'BgFallbackFolder_NSMBU'
+
+
+def ResolveDistantViewFolder(path, isDX):
+    """
+    The background model folder for a folder picked by the user, or None. Accepts the
+    model folder itself or anything around it: Deluxe romfs, romfs/Model or romfs/Course;
+    Wii U content, content/Common, content/Common/distant_view or a course folder.
+    """
+    if not path:
+        return None
+
+    key = (str(path), bool(isDX))
+    if key not in _resolvedDistantViewFolders:
+        _resolvedDistantViewFolders[key] = _resolveDistantViewFolder(str(path), isDX)
+    return _resolvedDistantViewFolders[key]
+
+
+# ResolveDistantViewFolder's answers (the live background asks for every render)
+_resolvedDistantViewFolders = {}
+
+
+def _resolveDistantViewFolder(path, isDX):
+    path = os.path.normpath(path)
+    if isDX:
+        candidates = [path, os.path.join(path, 'Model'), os.path.join(path, 'romfs', 'Model'),
+                      os.path.join(os.path.dirname(path), 'Model')]
+        pattern = '.Nin_NX_NVN.szs'
+    else:
+        candidates = [path, os.path.join(path, 'distant_view'), os.path.join(path, 'Common', 'distant_view'),
+                      os.path.join(path, 'content', 'Common', 'distant_view'),
+                      os.path.join(os.path.dirname(path), 'distant_view'),
+                      os.path.join(os.path.dirname(os.path.dirname(path)), 'Common', 'distant_view')]
+        pattern = '.szs'
+
+    for folder in candidates:
+        try:
+            if os.path.isdir(folder) and any(f.startswith('dv_') and f.endswith(pattern)
+                                             and (isDX or not f.endswith('.Nin_NX_NVN.szs'))
+                                             for f in os.listdir(folder)):
+                return folder
+        except OSError:
+            continue
+    return None
+
+
 def _mod_root(folder_name):
     """Return the directory containing main.xml for a mod, checking userdata first."""
     _user = os.path.join(globals.user_data_path, 'patches', folder_name)
@@ -254,17 +304,56 @@ class MiyamotoGameDefinition:
 
         return None
 
-    def FindDistantViewFile(self, name):
+    def DistantViewFolders(self):
         """
-        Deluxe only: path of the background model "dv_<name>.Nin_NX_NVN.szs" in the most
-        specific "Model" folder (next to a game/mod "Course" folder) that has it, or None.
+        The existing folders holding background models, most specific (mods) first.
+        Deluxe: the "Model" folder next to each game/mod "Course" folder. Wii U: the
+        "distant_view" folder next to each "course" folder, else content/Common's
+        (NSLU's course folder, content/0010/course, uses the Common backgrounds).
+        Last comes the base game folder set in Preferences > Background Preview: a mod
+        only ships the backgrounds it changed, and the game takes the rest from the
+        base game.
         """
-        filename = 'dv_%s.Nin_NX_NVN.szs' % name
+        folders = []
         for path in reversed(self.GetGamePaths()):
             if not path:
                 continue
 
-            candidate = os.path.join(os.path.dirname(os.path.normpath(path)), 'Model', filename)
+            parent = os.path.dirname(os.path.normpath(path))
+            if self.isDX:
+                candidates = [os.path.join(parent, 'Model')]
+            else:
+                candidates = [os.path.join(parent, 'distant_view'),
+                              os.path.join(os.path.dirname(parent), 'Common', 'distant_view')]
+
+            for folder in candidates:
+                if os.path.isdir(folder) and folder not in folders:
+                    folders.append(folder)
+
+        fallback = ResolveDistantViewFolder(setting(DistantViewFallbackSetting(self.isDX), '') or '', self.isDX)
+        if fallback and fallback not in folders:
+            folders.append(fallback)
+
+        return folders
+
+    def DistantViewFileName(self, name):
+        """
+        The file name of background model <name> for this game's platform
+        """
+        return ('dv_%s.Nin_NX_NVN.szs' if self.isDX else 'dv_%s.szs') % name
+
+    def FindDistantViewFile(self, name):
+        """
+        Path of the background model "<name>" (Deluxe: dv_<name>.Nin_NX_NVN.szs, Wii U:
+        dv_<name>.szs) in the most specific folder that has it (see
+        DistantViewFolders), or None.
+        """
+        if not name:
+            return None
+
+        filename = self.DistantViewFileName(name)
+        for folder in self.DistantViewFolders():
+            candidate = os.path.join(folder, filename)
             if os.path.isfile(candidate):
                 return candidate
 

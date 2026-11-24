@@ -22,7 +22,7 @@
 # along with Miyamoto!.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-Draws Deluxe background models with OpenGL into an offscreen framebuffer, fast enough
+Draws background models (Wii U and Deluxe) with OpenGL into an offscreen framebuffer, fast enough
 to follow the editor's view as it scrolls. Uses only Qt's OpenGL classes; the camera
 is the game's (see dvrender._ZoneCamera). Unlit, like the QPainter renderer, but with
 a depth buffer, perspective-correct and repeating textures, and cut-outs.
@@ -202,10 +202,11 @@ def buildArrays(meshes):
             colors = None
 
         # Some meshes carry all-zero vertex colours their shader doesn't use (like a
-        # sky): treat unused colour/alpha as white instead of blacking the mesh out
+        # sky; on Wii U they can read as -1): treat unused colour/alpha as white instead
+        # of blacking the mesh out
         if colors:
-            unusedRGB = not any(any(c[:3]) for c in colors)
-            unusedAlpha = not any(c[3] for c in colors if len(c) > 3)
+            unusedRGB = not any(v > 0 for c in colors for v in c[:3])
+            unusedAlpha = not any(c[3] > 0 for c in colors if len(c) > 3)
             if unusedRGB or unusedAlpha:
                 colors = [(1.0, 1.0, 1.0, c[3] if len(c) > 3 else 1.0) if unusedRGB and not unusedAlpha
                           else (c[0], c[1], c[2], 1.0) if unusedAlpha and not unusedRGB
@@ -509,21 +510,21 @@ class GLBackgroundRenderer:
         model = self.models.get(path)
         return model is not None and model.animated
 
-    def render(self, jobs, viewRect, width, height, frame=0.0):
+    def render(self, jobs, viewRect, width, height, frame=0.0, options=None):
         """
         Renders the zones' backgrounds as the game shows them with the screen centred on
         the view, at an animation frame (60 per second). jobs: [(path, zone rect,
         camera mode, camera zoom)] of uploaded models; rects in level units, Y going
-        down. Returns a width x height QImage of the whole view, transparent outside the
-        zones.
+        down. options: dvrender.ViewOptions. Returns a width x height QImage of the
+        whole view, transparent outside the zones.
         """
         self.context.makeCurrent(self.surface)
         try:
-            return self._render(jobs, viewRect, width, height, frame)
+            return self._render(jobs, viewRect, width, height, frame, options)
         finally:
             self.context.doneCurrent()
 
-    def _render(self, jobs, viewRect, width, height, frame):
+    def _render(self, jobs, viewRect, width, height, frame, options):
         gl = self.gl
         if self.fbo is None or self.fbo.width() != width or self.fbo.height() != height:
             fboFormat = QtGui.QOpenGLFramebufferObjectFormat()
@@ -575,7 +576,7 @@ class GLBackgroundRenderer:
             gl.glScissor(left, height - bottom, right - left, bottom - top)
             gl.glClear(GL_DEPTH_BUFFER_BIT)
 
-            viewMatrix = self._matrix(model, zoneRect, camMode, camZoom, viewRect, width / height)
+            viewMatrix = self._matrix(model, zoneRect, camMode, camZoom, viewRect, options)
             bones = model.boneMatrices(frame)
 
             for buffer, count, units, state, boneIndex in model.meshes:
@@ -658,44 +659,42 @@ class GLBackgroundRenderer:
         return min(max(center, low + half), high - half)
 
     @staticmethod
-    def _matrix(model, zoneRect, camMode, camZoom, viewRect, aspect):
+    def _matrix(model, zoneRect, camMode, camZoom, viewRect, options=None):
         """
-        The game's camera for this zone with the screen centred on the view, as a
-        projection * view * model matrix
+        The game's camera for this zone placed for the editor's view (see
+        dvrender.ViewOptions), as a projection * view * model matrix covering the view
         """
         zoneX, zoneY, zoneW, zoneH = zoneRect
         viewX, viewY, viewW, viewH = viewRect
         cam = dvrender._ZoneCamera(model.camera, zoneW, zoneH, camMode, camZoom)
+        frame = dvrender.liveFrame(cam, zoneRect, viewRect, options)
 
-        # The view's middle, kept inside the zone, in zone coordinates with Y going up
-        screenX = min(max(viewX + viewW / 2, zoneX), zoneX + zoneW) - zoneX
-        screenY = -(min(max(viewY + viewH / 2, zoneY), zoneY + zoneH) - zoneY)
-        camX, camY, offsetX, offsetY = cam.cameraFor(screenX, screenY)
-
-        # Perspective frustum shifted by the projection offset (a fraction of its size)
+        # The frustum showing the whole view (zone coordinates, Y going up)
         near = dvrender._NEAR
-        clipH = 2 * near * math.tan(dvrender._FOV_Y / 2)
-        clipW = clipH * aspect
-        centerX, centerY = clipW * offsetX, clipH * offsetY
+        left, right, bottom, top = cam.frustum(frame, viewX - zoneX, viewX + viewW - zoneX,
+                                               zoneY - viewY - viewH, zoneY - viewY, near)
 
-        # Keep the farthest solid layer (the sky) covering the view: in zones taller or
-        # wider than the game's levels, the view would otherwise move past its edges.
-        # The picture's shift is limited instead (it moves near and far scenery alike),
-        # so the background stops scrolling there.
-        if model.backdrop is not None:
-            left, right, bottom, top, z = model.backdrop
+        # Filling the view, keep the farthest solid layer (the sky) covering it: in
+        # zones taller or wider than the game's levels, the view would otherwise move
+        # past its edges. The picture's shift is limited instead (it moves near and far
+        # scenery alike), so the background stops scrolling there. At the level's scale
+        # the picture stays where the game has it.
+        if options is not None and options.fillView and model.backdrop is not None:
+            boxLeft, boxRight, boxBottom, boxTop, z = model.backdrop
             depth = cam.cameraZ - (z + cam.modelZ)
             if depth > near:
                 scale = depth / near
-                centerX = (GLBackgroundRenderer._clampView(camX + centerX * scale, clipW / 2 * scale,
-                                                           left + cam.modelX, right + cam.modelX) - camX) / scale
-                centerY = (GLBackgroundRenderer._clampView(camY + centerY * scale, clipH / 2 * scale,
-                                                           bottom + cam.modelY, top + cam.modelY) - camY) / scale
+                clamp = GLBackgroundRenderer._clampView
+                halfW, halfH = (right - left) / 2, (top - bottom) / 2
+                centerX = (clamp(frame.camX + (left + halfW) * scale, halfW * scale,
+                                 boxLeft + cam.modelX, boxRight + cam.modelX) - frame.camX) / scale
+                centerY = (clamp(frame.camY + (bottom + halfH) * scale, halfH * scale,
+                                 boxBottom + cam.modelY, boxTop + cam.modelY) - frame.camY) / scale
+                left, right, bottom, top = centerX - halfW, centerX + halfW, centerY - halfH, centerY + halfH
 
         matrix = QtGui.QMatrix4x4()
-        matrix.frustum(centerX - clipW / 2, centerX + clipW / 2, centerY - clipH / 2, centerY + clipH / 2,
-                       near, _FAR)
-        matrix.translate(-camX, -camY, -cam.cameraZ)
+        matrix.frustum(left, right, bottom, top, near, _FAR)
+        matrix.translate(-frame.camX, -frame.camY, -cam.cameraZ)
         matrix.translate(cam.modelX, cam.modelY, cam.modelZ)
         return matrix
 

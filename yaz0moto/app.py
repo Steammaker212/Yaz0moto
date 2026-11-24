@@ -424,16 +424,35 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(0, self._restoreWindowState)
 
     def _restoreWindowState(self):
+        if getattr(self, '_defaultWindowState', None) is None:
+            self._defaultWindowState = self.saveState(0)  # for View > Reset Panel Layout
         if globals.settings.contains('MainWindowGeometry'):
             self.restoreGeometry(setting('MainWindowGeometry'))
         if globals.settings.contains('MainWindowState'):
             self.restoreState(setting('MainWindowState'), 0)
+        # The Palette (tilesets, actors...) is where everything is placed from: a layout saved
+        # with it closed (Ctrl+P is easy to press by mistake) brings it back
+        if not self.creationDock.isVisible():
+            self.creationDock.setFloating(False)
+            self.creationDock.show()
         # The properties panel used to float by default: move a saved floating one into the
         # right sidebar once (after that, where it's put is remembered)
         if not setting('PropEditorInSidebar', False):
             setSetting('PropEditorInSidebar', True)
             if self.propEditorDock.isFloating():
                 self.propEditorDock.setFloating(False)
+        self.PlacePartsBar()
+
+    def ResetPanelLayout(self):
+        """Puts the panels back as they are the first time Yaz0moto starts."""
+        default = getattr(self, '_defaultWindowState', None)
+        if default is not None:
+            self.restoreState(default, 0)
+        for dock in (self.creationDock, self.levelOverviewDock):
+            dock.setFloating(False)
+            dock.show()
+        self.quickPaintDock.hide()
+        setSetting('MainWindowState', self.saveState(0))
         self.PlacePartsBar()
 
     def PlacePartsBar(self):
@@ -738,7 +757,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         )
         self.CreateAction(
             'livebg', self.HandleLiveBackgroundToggle, GetIcon('background'),
-            'Live Background (Deluxe)',
+            'Live Background',
             'Show each zone\'s background model behind the view, as the game would with the screen there',
             None, True,
         )
@@ -1363,6 +1382,11 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         act.setShortcut(QtGui.QKeySequence('Ctrl+P'))
         act.setIcon(GetIcon('palette'))
         act.setStatusTip('Show or hide the Palette window')
+        self.vmenu.addAction(act)
+
+        act = QtWidgets.QAction('Reset Panel Layout', self)
+        act.setStatusTip('Put the panels (Palette, Level Overview, Quick Paint...) back where they start out')
+        act.triggered.connect(self.ResetPanelLayout)
         self.vmenu.addAction(act)
 
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
@@ -3477,6 +3501,13 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         # Get the Menubar setting
         setSetting('Menu', 'Menubar')
 
+        # How backgrounds line up with the level: re-render them if that changed
+        if dlg.backgroundTab.save():
+            for zone in getattr(globals.Area, 'zones', ()):
+                if getattr(zone, 'bgPreview', None) is not None:
+                    self.RenderZoneBackground(zone)
+            self.ResetLiveBackground()
+
         # Determine the pivotal rotation animation FPS
         SLib.RotationFPS = dlg.generalTab.rotationFPS.value()
         setSetting('RotationFPS', SLib.RotationFPS)
@@ -3875,6 +3906,12 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         globals.TilesetEdited = False
         self.UpdateTitle()
         self.ClearAutosave()
+        # Quick Paint shapes (kept beside the settings, not in the level) go with it
+        try:
+            from . import qpshapes
+            qpshapes.level_saved(self.fileSavePath)
+        except Exception as e:
+            print('Could not save the Quick Paint shapes: %s' % e)
         return True
 
     def HandleExit(self):
@@ -3931,11 +3968,33 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
         wanted, current = ('Deluxe', 'Wii U') if isDeluxeLevel else ('Wii U', 'Deluxe')
 
-        QtWidgets.QMessageBox.warning(
+        answer = QtWidgets.QMessageBox.question(
             self, 'Yaz0moto',
             'This is a %s level, but Yaz0moto is in %s mode.\n\n'
-            'Switch to %s mode (on the welcome screen or in Preferences) before opening this level.' % (wanted, current, wanted))
-        return False
+            'Switch to %s mode and open it?' % (wanted, current, wanted),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+        if answer != QtWidgets.QMessageBox.Yes:
+            return False
+        return self.switchPlatform(isDeluxeLevel)
+
+    def switchPlatform(self, isDX):
+        """
+        Switches to the Deluxe (isDX) or Wii U base game, keeping the active mods, as the
+        welcome screen's switch does. Returns whether the editor is now in that mode.
+        """
+        from . import loading as _loading
+        mods = setting('LastMods') or []
+        if isinstance(mods, str):
+            mods = [mods]
+        base = _loading.ResolveBaseGameForDeluxe(bool(isDX))
+        setSetting('isDX', bool(isDX))
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            _loading.LoadGameDef(base, mods, dlg=True)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.updateOpenByNameState()
+        return bool(globals.IsNSMBUDX) == bool(isDX)
 
     @staticmethod
     def _usesOuterSarc():
@@ -4976,8 +5035,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             self.RecentMenu.AddToList(self.fileSavePath)
 
         # The previous level's live background no longer applies
-        self.scene.liveBackground = None
-        self.QueueLiveBackground()
+        self.ResetLiveBackground()
 
         # The previous level's recovery copy is no longer needed (if the user had unsaved
         # changes, they were asked before getting here)
@@ -6520,6 +6578,17 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         """
         # Esc closes the properties panel (like its X), then puts down the picked part, so
         # clicking the level selects again. It never closes the editor itself.
+        # Quick Paint's Shape mode: Enter finishes the shape being drawn, Backspace takes back its last node
+        # Delete/Backspace removes the selected node, or else the selected shape
+        if quickpaint.isActive() and event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Backspace, Qt.Key_Delete):
+            from . import qpshapes
+            if event.key() in (Qt.Key_Backspace, Qt.Key_Delete):
+                done = quickpaint.panel().mode == quickpaint.MODE_SHAPE and qpshapes.delete_key()
+            else:
+                done = qpshapes.finish()
+            if done:
+                event.accept()
+                return
         if event.key() == Qt.Key_Escape:
             if quickpaint.isActive():
                 # A line of slopes being drawn ends first, then painting stops
@@ -6823,20 +6892,24 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
 
     def RenderZoneBackground(self, zone):
         """
-        Renders a preview of the zone's background model and shows it behind the zone (Deluxe only)
+        Renders a preview of the zone's background model and shows it behind the zone
+        (Wii U and Deluxe)
         """
         name = bytes_to_string(zone.background[4])
-        path = globals.gamedef.FindDistantViewFile(name) if globals.IsNSMBUDX else None
+        path = globals.gamedef.FindDistantViewFile(name)
         if path is None:
             QtWidgets.QMessageBox.warning(self, 'Background Preview',
-                'Could not find the background model "%s" in the game\'s Model folder.' % BGTab.fileNameFor(name))
+                'Could not find the background model "%s" in the game\'s %s folder.\n\n'
+                'If this is a mod, set the base game\'s folder in Preferences > General > Background '
+                'Preview: mods only include the backgrounds they change.'
+                % (BGTab.fileNameFor(name), BGTab.fileFolder()))
             return
 
         threads = getattr(self, '_dvRenderThreads', None)
         if threads is None:
             threads = self._dvRenderThreads = set()
 
-        thread = dvrender.DistantViewRenderThread(zone, path, self)
+        thread = dvrender.DistantViewRenderThread(zone, path, self, self._bgViewOptions())
         thread.progress.connect(self._zoneBackgroundProgress)
         thread.rendered.connect(self._zoneBackgroundRendered)
         thread.failed.connect(self._zoneBackgroundFailed)
@@ -6978,10 +7051,46 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage('Loading background %s...' % os.path.basename(path))
         thread.start()
 
+    def _bgViewOptions(self):
+        """
+        How backgrounds line up with the level (Preferences > Background Preview)
+        """
+        return dvrender.viewOptionsFromSettings(setting)
+
+    def _reportMissingBackground(self, name):
+        """
+        Says once (per level) in the status bar that a zone's background model isn't
+        in the game's folders, and where to point the editor at it
+        """
+        reported = self.__dict__.setdefault('_bgMissingReported', set())
+        if not name or name in reported:
+            return
+        reported.add(name)
+
+        message = 'Background %s not found in %s.' % (
+            BGTab.fileNameFor(name), ', '.join(globals.gamedef.DistantViewFolders()) or "the game's folders")
+        message += (" If this is a mod, set the base game's folder in Preferences > General > "
+                    'Background Preview (mods only include the backgrounds they change).')
+        print('Live background: ' + message)
+        self.statusBar().showMessage(message, 15000)
+
+    def ResetLiveBackground(self):
+        """
+        Forgets the live background shown and any render still running for it (a
+        level or game was loaded, or the background settings changed), then renders
+        it again
+        """
+        self._liveBgGeneration = getattr(self, '_liveBgGeneration', 0) + 1
+        self.__dict__.pop('_glBgFailed', None)
+        self.__dict__.pop('_bgMissingReported', None)
+        self.scene.liveBackground = None
+        self.scene.update()
+        self.QueueLiveBackground()
+
     def _renderLiveBackground(self):
         """
-        Starts rendering the background of every Deluxe zone in view, as the game shows
-        it with the screen at the middle of the view
+        Starts rendering the background of every zone in view (Wii U and Deluxe), as the
+        game shows it with the screen at the middle of the view
         """
         if not globals.LiveBackgroundEnabled or not hasattr(globals.Area, 'zones'):
             return
@@ -7000,17 +7109,20 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
                     sceneRect.width() * toLevel, sceneRect.height() * toLevel)
 
         jobs = []
-        if globals.IsNSMBUDX:
-            viewX, viewY, viewW, viewH = viewRect
-            for zone in globals.Area.zones:
-                if (zone.objx >= viewX + viewW or zone.objx + zone.width <= viewX
-                        or zone.objy >= viewY + viewH or zone.objy + zone.height <= viewY):
-                    continue
+        viewX, viewY, viewW, viewH = viewRect
+        for zone in globals.Area.zones:
+            if (zone.objx >= viewX + viewW or zone.objx + zone.width <= viewX
+                    or zone.objy >= viewY + viewH or zone.objy + zone.height <= viewY):
+                continue
 
-                path = globals.gamedef.FindDistantViewFile(bytes_to_string(zone.background[4]))
-                if path is not None:
-                    jobs.append((path, (zone.objx, zone.objy, zone.width, zone.height),
-                                 zone.cammode, zone.camzoom))
+            name = bytes_to_string(zone.background[4])
+            path = globals.gamedef.FindDistantViewFile(name)
+            if path is not None:
+                jobs.append((path, (zone.objx, zone.objy, zone.width, zone.height),
+                             zone.cammode, zone.camzoom))
+            else:
+                self._reportMissingBackground(name)
+        options = self._bgViewOptions()
 
         if not jobs:
             self._setLiveBackgroundAnimating(False)
@@ -7027,7 +7139,7 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
             ready = [job for job in jobs if renderer.has(job[0])]
             if ready:
                 image = renderer.render(ready, viewRect, max(1, viewport.width()), max(1, viewport.height()),
-                                        self._liveBackgroundFrame())
+                                        self._liveBackgroundFrame(), options)
                 self.scene.liveBackground = (sceneRect, [QtGui.QPixmap.fromImage(image)])
             else:
                 self.scene.liveBackground = None
@@ -7042,15 +7154,17 @@ class MiyamotoWindow(QtWidgets.QMainWindow):
         width = max(1, round(viewport.width() * reduce))
         height = max(1, round(viewport.height() * reduce))
 
-        thread = self._liveBgThread = dvrender.LiveViewRenderThread(jobs, viewRect, width, height, self)
+        generation = getattr(self, '_liveBgGeneration', 0)
+        thread = self._liveBgThread = dvrender.LiveViewRenderThread(jobs, viewRect, width, height, self, options)
         thread.status.connect(lambda text: self.statusBar().showMessage(text))
-        thread.rendered.connect(lambda images: self._liveBackgroundRendered(sceneRect, images))
+        thread.rendered.connect(lambda images: self._liveBackgroundRendered(sceneRect, images, generation))
         thread.failed.connect(lambda text: self.statusBar().showMessage('Live background failed: ' + text, 5000))
         thread.finished.connect(self._liveBackgroundFinished)
         thread.start()
 
-    def _liveBackgroundRendered(self, sceneRect, images):
-        if not globals.LiveBackgroundEnabled:
+    def _liveBackgroundRendered(self, sceneRect, images, generation=0):
+        # Drop renders of a level, game or setting that's no longer current
+        if not globals.LiveBackgroundEnabled or generation != getattr(self, '_liveBgGeneration', 0):
             return
 
         self.scene.liveBackground = (sceneRect, [QtGui.QPixmap.fromImage(image) for image in images])

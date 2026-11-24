@@ -78,6 +78,14 @@ check('a nightly build is offered a release', core.is_newer(tagged('v1.2.0'), '0
 check('...but not the release it was installed from again (no endless update)',
       not core.is_newer(tagged('v1.2.0'), '0a872f4', 'nightly', installed_tag='v1.2.0'))
 check('...and is offered the next release after it', core.is_newer(tagged('v1.3.0'), '0a872f4', 'nightly', 'v1.2.0'))
+dated = core.ReleaseInfo('release', 'v1.2.0', '1.2.0', 'v1.2.0', '', '', (), '2026-10-24T17:20:22Z')
+check('a nightly built after a release is not offered that older release (no downgrade)',
+      not core.is_newer(dated, 'f70a4d9', 'nightly', build_date='2026-11-19T09:43:54Z'))
+check('...but is offered a release published after it was built',
+      core.is_newer(dated, 'f70a4d9', 'nightly', build_date='2026-10-01T00:00:00Z'))
+check('the published date comes from GitHub', core.release_from_json(
+    {'tag_name': 'v1.2.0', 'assets': [], 'published_at': '2026-10-24T17:20:22Z'}, core.CHANNEL_RELEASE).published
+      == '2026-10-24T17:20:22Z')
 check('release versions compare as numbers', core.is_newer(tagged('v1.10.0'), '1.9.0')
       and not core.is_newer(tagged('v1.2.0'), '1.2') and not core.is_newer(tagged('v1.0.9'), '1.1.0'))
 

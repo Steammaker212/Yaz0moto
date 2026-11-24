@@ -44,6 +44,7 @@ _project = _load_project_info()
 MiyamotoID = _project['id']
 MiyamotoVersion = _project['version']
 MiyamotoReleaseType = _project.get('release_type', 'release')
+MiyamotoBuildDate = _project.get('build_date')  # UTC, set by the build workflow
 
 app = None
 mainWindow = None

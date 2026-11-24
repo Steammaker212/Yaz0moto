@@ -5338,9 +5338,6 @@ class LevelViewWidget(QtWidgets.QGraphicsView):
         menu = QtWidgets.QMenu(self)
         menu.addSection(zone.title)
         render = menu.addAction('Render Background Preview')
-        render.setEnabled(globals.IsNSMBUDX)
-        if not globals.IsNSMBUDX:
-            render.setToolTip('Only available for New Super Mario Bros. U Deluxe')
         clear = menu.addAction('Clear Background Preview')
         clear.setEnabled(zone.bgPreview is not None)
 

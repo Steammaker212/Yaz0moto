@@ -22,16 +22,19 @@
 # along with Miyamoto!.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-Rough preview renders of Deluxe background ("distant view") models.
+Rough preview renders of background ("distant view") models, for Wii U and Deluxe.
 
-A background is a 3D scene (Model/dv_<name>.Nin_NX_NVN.szs, holding output.bfres). This
-reads the meshes and their main texture out of the BFRES and draws them with QPainter:
-each triangle is filled with its texture, back to front, unlit. No shaders, lighting,
-fog or animations, so it only gives an idea of what the zone's background looks like.
+A background is a 3D scene: on Deluxe Model/dv_<name>.Nin_NX_NVN.szs (holding
+output.bfres), on Wii U (NSMBU and NSLU) content/Common/distant_view/dv_<name>.szs
+(holding dv_<name>.bfres). This reads the meshes and their main texture out of the BFRES
+and draws them with QPainter: each triangle is filled with its texture, back to front,
+unlit. No shaders, lighting, fog or animations, so it only gives an idea of what the
+zone's background looks like (dvgl draws them closer to the game).
 
-The BFRES layout follows Switch Toolbox's BfresLibrary (Switch, version 8).
+The BFRES layouts follow Switch Toolbox's BfresLibrary (Switch version 8, Wii U 3.0).
 """
 
+import copy
 import math
 import os
 import re
@@ -102,6 +105,15 @@ _FMAT_SIZE = 0xB8
 
 def _offset(b, off):
     return struct.unpack_from('<q', b, off)[0]
+
+
+def _rel(b, off):
+    """
+    A Wii U BFRES offset (big endian, relative to its own field), as an absolute
+    position; 0 if it's empty
+    """
+    value = struct.unpack_from('>i', b, off)[0]
+    return off + value if value else 0
 
 
 def _string(b, off):
@@ -255,6 +267,16 @@ def _colorTexture(b, fmat):
     nameArray = _offset(b, fmat + 0x38)
     textures = [_string(b, _offset(b, nameArray + i * 8)) for i in range(numTextures)]
     samplers = _dictNames(b, _offset(b, fmat + 0x50))
+    return _pickColorTexture(samplers, textures)
+
+
+def _pickColorTexture(samplers, textures):
+    """
+    Of a material's textures (and their sampler names), the one that most likely holds
+    its colours, or None
+    """
+    if not textures:
+        return None
 
     # The first "_aN" sampler that isn't a helper texture (light map, distortion map...)
     helpers = ('lm_', 'ind', 'dof')
@@ -312,24 +334,33 @@ class AnimCurve:
     One animated value over time (BFRES AnimCurve)
     """
 
-    def __init__(self, b, curve):
-        frameArray, keyArray = _offset(b, curve), _offset(b, curve + 8)
-        flags, numKeys, self.target = struct.unpack_from('<HHI', b, curve + 0x10)
-        self.start, self.end, self.scale, self.offset, self.delta = struct.unpack_from('<5f', b, curve + 0x18)
+    def __init__(self, b, curve, wiiU=False):
+        if wiiU:
+            # Wii U (version 3.0, big endian): offsets relative to their own field
+            flags, numKeys, self.target = struct.unpack_from('>HHI', b, curve)
+            self.start, self.end, self.scale, self.offset = struct.unpack_from('>4f', b, curve + 8)
+            self.delta = 0.0
+            frameArray, keyArray = _rel(b, curve + 0x18), _rel(b, curve + 0x1C)
+            endian = '>'
+        else:
+            frameArray, keyArray = _offset(b, curve), _offset(b, curve + 8)
+            flags, numKeys, self.target = struct.unpack_from('<HHI', b, curve + 0x10)
+            self.start, self.end, self.scale, self.offset, self.delta = struct.unpack_from('<5f', b, curve + 0x18)
+            endian = '<'
 
         frameType, keyType, self.curveType = flags & 3, (flags >> 2) & 3, (flags >> 4) & 7
         if frameType == 0:
-            self.frames = list(struct.unpack_from('<%df' % numKeys, b, frameArray))
+            self.frames = list(struct.unpack_from('%s%df' % (endian, numKeys), b, frameArray))
         elif frameType == 1:  # fixed point, 5 fraction bits
-            self.frames = [f / 32 for f in struct.unpack_from('<%dh' % numKeys, b, frameArray)]
+            self.frames = [f / 32 for f in struct.unpack_from('%s%dh' % (endian, numKeys), b, frameArray)]
         else:
-            self.frames = list(struct.unpack_from('<%dB' % numKeys, b, frameArray))
+            self.frames = list(struct.unpack_from('%dB' % numKeys, b, frameArray))
 
         # Values per key: cubic 4 coefficients, linear 2, the rest 1
         per = {0: 4, 1: 2}.get(self.curveType, 1)
         stepInt = self.curveType in (4, 6)
         char = ('I' if stepInt else 'f', 'h', 'b')[keyType]
-        flat = struct.unpack_from('<%d%s' % (numKeys * per, char), b, keyArray)
+        flat = struct.unpack_from('%s%d%s' % (endian, numKeys * per, char), b, keyArray)
         self.keys = [flat[i * per:(i + 1) * per] for i in range(numKeys)]
 
     def value(self, frame):
@@ -629,6 +660,471 @@ def parseBFRES(b):
     return meshes
 
 
+def isWiiUBFRES(b):
+    """
+    Whether a BFRES is the Wii U kind (version 3.x, big endian) rather than the Switch's
+    """
+    return b[:4] == b'FRES' and b[4:8] != b'    ' and b[8:10] == b'\xFE\xFF'
+
+
+# The Wii U BFRES (version 3.0, as NSMBU and NSLU ship it) follows BfresLibrary's Wii U
+# loader. All offsets are big endian and relative to their own field.
+
+def _wiiuString(b, off):
+    if not off:
+        return ''
+    n = struct.unpack_from('>I', b, off - 4)[0]
+    return b[off:off + n].decode('utf-8', 'replace')
+
+
+def _wiiuDict(b, off):
+    """
+    A Wii U index group as [(name, data position)], in order
+    """
+    if not off:
+        return []
+    count = struct.unpack_from('>i', b, off + 4)[0]
+    out = []
+    for i in range(1, count + 1):
+        entry = off + 8 + i * 16
+        out.append((_wiiuString(b, _rel(b, entry + 8)), _rel(b, entry + 12)))
+    return out
+
+
+# GX2 vertex attribute formats by their low byte: (components, bytes per component),
+# with 0x09/0x0B packed and 0x03/0x08/0x0F half floats
+_GX2_LAYOUTS = {
+    0x00: (1, 1), 0x02: (1, 2), 0x03: (1, 2), 0x04: (2, 1), 0x05: (1, 4), 0x06: (1, 4),
+    0x07: (2, 2), 0x08: (2, 2), 0x0A: (4, 1), 0x0C: (2, 4), 0x0D: (2, 4), 0x0E: (4, 2),
+    0x0F: (4, 2), 0x10: (3, 4), 0x11: (3, 4), 0x12: (4, 4), 0x13: (4, 4),
+}
+_GX2_HALF = (0x03, 0x08, 0x0F)
+_GX2_FLOAT = (0x06, 0x0D, 0x11, 0x13)
+
+
+def _readAttributeWiiU(data, stride, offset, fmt, count):
+    """
+    Decodes one big endian GX2 vertex attribute into float tuples, or None if the
+    format isn't supported
+    """
+    base, kind = fmt & 0xFF, (fmt >> 8) & 0xF   # kind: 0 unorm, 1 uint, 2 snorm, 3 sint, 8 float
+
+    if base == 0x0B:  # 10_10_10_2 (normals): x in the low bits
+        out = []
+        for i in range(count):
+            word = struct.unpack_from('>I', data, i * stride + offset)[0]
+            values = []
+            for shift in (0, 10, 20):
+                v = (word >> shift) & 0x3FF
+                if kind == 2:
+                    if v & 0x200:
+                        v -= 0x400
+                    values.append(max(-1.0, v / 511))
+                else:
+                    values.append(v / 1023)
+            out.append(tuple(values))
+        return out
+
+    if base not in _GX2_LAYOUTS:
+        return None
+
+    comps, size = _GX2_LAYOUTS[base]
+    if base in _GX2_FLOAT or kind == 8 and size == 4:
+        char, scale = 'f', None
+    elif base in _GX2_HALF:
+        char, scale = 'e', None
+    else:
+        signed = kind in (2, 3)
+        char = {1: 'b', 2: 'h', 4: 'i'}[size] if signed else {1: 'B', 2: 'H', 4: 'I'}[size]
+        if kind == 0:
+            scale = 1 / ((1 << (size * 8)) - 1)
+        elif kind == 2:
+            scale = 1 / ((1 << (size * 8 - 1)) - 1)
+        else:
+            scale = None
+
+    unpacker = struct.Struct('>' + char * comps)
+    out = []
+    for i in range(count):
+        values = unpacker.unpack_from(data, i * stride + offset)
+        if scale is not None:
+            values = tuple(max(-1.0, v * scale) for v in values)
+        out.append(values)
+    return out
+
+
+def _readVertexBufferWiiU(b, fvtx):
+    """
+    The named attributes of a Wii U FVTX, decoded
+    """
+    numAttrib, numBuffer = b[fvtx + 4], b[fvtx + 5]
+    vertexCount = struct.unpack_from('>I', b, fvtx + 8)[0]
+    attribArray, bufferArray = _rel(b, fvtx + 0x10), _rel(b, fvtx + 0x18)
+
+    buffers = []
+    for i in range(numBuffer):
+        buf = bufferArray + i * 0x18
+        size = struct.unpack_from('>I', b, buf + 4)[0]
+        stride = struct.unpack_from('>H', b, buf + 0xC)[0]
+        start = _rel(b, buf + 0x14)
+        buffers.append((b[start:start + size], stride))
+
+    attributes = {}
+    for i in range(numAttrib):
+        attrib = attribArray + i * 12
+        name = _wiiuString(b, _rel(b, attrib))
+        bufferIndex, offset, fmt = struct.unpack_from('>BxHI', b, attrib + 4)
+        if bufferIndex >= len(buffers):
+            continue
+        data, stride = buffers[bufferIndex]
+        values = _readAttributeWiiU(data, stride, offset, fmt, vertexCount)
+        if values is not None:
+            attributes[name] = values
+    return attributes
+
+
+def _readTrianglesWiiU(b, mesh):
+    """
+    The triangles of a Wii U shape's first (most detailed) mesh
+    """
+    primitive, indexFormat, indexCount = struct.unpack_from('>III', b, mesh)
+    indexBuffer = _rel(b, mesh + 0x14)
+    firstVertex = struct.unpack_from('>I', b, mesh + 0x18)[0]
+    char = {0: '<H', 1: '<I', 4: '>H', 9: '>I'}.get(indexFormat)
+    if char is None or primitive not in (4, 6) or not indexBuffer:
+        return []
+
+    start = _rel(b, indexBuffer + 0x14)
+    indices = struct.unpack_from('%s%d%s' % (char[0], indexCount, char[1]), b, start)
+    indices = [i + firstVertex for i in indices]
+
+    if primitive == 4:  # triangle list
+        return [tuple(indices[i:i + 3]) for i in range(0, indexCount - 2, 3)]
+
+    tris = []
+    for i in range(indexCount - 2):
+        a, c, d = indices[i:i + 3]
+        tris.append((a, c, d) if i % 2 == 0 else (c, a, d))
+    return tris
+
+
+# Bytes taken by each Wii U shader parameter type (version 3.0 doesn't store the size)
+_WIIU_PARAM_SIZES = {
+    0: 4, 1: 8, 2: 12, 3: 16, 4: 4, 5: 8, 6: 12, 7: 16, 8: 4, 9: 8, 10: 12, 11: 16,
+    12: 4, 13: 8, 14: 12, 15: 16, 17: 16, 18: 24, 19: 32, 21: 24, 22: 36, 23: 48,
+    25: 32, 26: 48, 27: 64, 28: 20, 29: 36, 30: 24, 31: 28,
+}
+
+# GX2 blend functions and comparisons, as the Switch materials' render info names them
+_GX2_BLEND = ('zero', 'one', 'src_color', 'one_minus_src_color', 'src_alpha', 'one_minus_src_alpha',
+              'dst_alpha', 'one_minus_dst_alpha', 'dst_color', 'one_minus_dst_color')
+_GX2_COMPARE = ('never', 'less', 'equal', 'lequal', 'greater', 'notequal', 'gequal', 'always')
+
+
+def _readMaterialWiiU(b, fmat):
+    """
+    A Wii U material's textures, render info and shader parameters. Its GX2 render
+    state is translated into the render info names the Switch materials use, so both
+    are drawn the same way.
+    """
+    name = _wiiuString(b, _rel(b, fmat + 4))
+    numTextures = b[fmat + 0x11]
+    texRefs = _rel(b, fmat + 0x28)
+    textures = [_wiiuString(b, _rel(b, texRefs + i * 8)) for i in range(numTextures)]
+    samplers = [n for n, _ in _wiiuDict(b, _rel(b, fmat + 0x30))]
+
+    renderInfo = {}
+    for infoName, entry in _wiiuDict(b, _rel(b, fmat + 0x1C)):
+        count, kind = struct.unpack_from('>HB', b, entry)
+        if kind == 2:
+            values = [_wiiuString(b, _rel(b, entry + 8 + j * 4)) for j in range(count)]
+        else:
+            values = list(struct.unpack_from('>%d%s' % (count, 'f' if kind == 1 else 'i'), b, entry + 8))
+        renderInfo[infoName] = values
+
+    state = _rel(b, fmat + 0x20)
+    if state:
+        flags, polygon, depth, alpha, alphaRef, color, _, blend = struct.unpack_from('>IIIIfIII', b, state)
+        mode = flags & 3
+        blending = bool((color >> 8) & 0xFF)
+        if mode == 0:
+            mode = 3 if blending else 1
+        renderInfo['gsys_render_state_mode'] = [('custom', 'opaque', 'mask', 'translucent')[mode]]
+        renderInfo['gsys_render_state_blend_mode'] = ['color' if blending and mode == 3 else 'none']
+        src, dst = blend & 0x1F, (blend >> 8) & 0x1F
+        renderInfo['gsys_color_blend_rgb_src_func'] = [_GX2_BLEND[src] if src < len(_GX2_BLEND) else 'src_alpha']
+        renderInfo['gsys_color_blend_rgb_dst_func'] = [_GX2_BLEND[dst] if dst < len(_GX2_BLEND) else 'one_minus_src_alpha']
+        renderInfo['gsys_depth_test_write'] = ['true' if depth & 4 else 'false']
+        cullFront, cullBack = polygon & 1, polygon & 2
+        renderInfo['gsys_render_state_display_face'] = [
+            'none' if cullFront and cullBack else 'back' if cullFront else 'front' if cullBack else 'both']
+        renderInfo['gsys_alpha_test_enable'] = ['true' if alpha & 8 else 'false']
+        renderInfo['gsys_alpha_test_func'] = [_GX2_COMPARE[alpha & 7]]
+        renderInfo['gsys_alpha_test_value'] = [alphaRef]
+
+    params = {}
+    source = _rel(b, fmat + 0x3C)
+    for paramName, entry in _wiiuDict(b, _rel(b, fmat + 0x38)):
+        kind, dataOffset = struct.unpack_from('>BxH', b, entry)
+        size = _WIIU_PARAM_SIZES.get(kind)
+        if size and source:
+            params[paramName] = struct.unpack_from('>%df' % (size // 4), b, source + dataOffset)
+
+    material = DistantViewMaterial(name, list(zip(samplers, textures)), renderInfo, params)
+    return material, _pickColorTexture(samplers, textures)
+
+
+def _eulerQuaternion(x, y, z):
+    """
+    A rotation given as XYZ Euler angles (radians, X applied first) as a quaternion
+    (x, y, z, w)
+    """
+    q = QtGui.QQuaternion.fromAxisAndAngle(0, 0, 1, math.degrees(z)) \
+        * QtGui.QQuaternion.fromAxisAndAngle(0, 1, 0, math.degrees(y)) \
+        * QtGui.QQuaternion.fromAxisAndAngle(1, 0, 0, math.degrees(x))
+    return q.x(), q.y(), q.z(), q.scalar()
+
+
+def _readSkeletonWiiU(b, fskl):
+    """
+    The bones of a Wii U FSKL, in index order
+    """
+    bones = {}
+    for _, bone in _wiiuDict(b, _rel(b, fskl + 0x10)):
+        index, parent = struct.unpack_from('>Hh', b, bone + 4)
+        flags = struct.unpack_from('>I', b, bone + 0x10)[0]
+        scale = struct.unpack_from('>3f', b, bone + 0x14)
+        rotation = struct.unpack_from('>4f', b, bone + 0x20)
+        if flags & 0x1000:  # Euler angles
+            rotation = _eulerQuaternion(*rotation[:3])
+        translation = struct.unpack_from('>3f', b, bone + 0x30)
+        bones[index] = (_wiiuString(b, _rel(b, bone)), parent, scale, rotation, translation)
+
+    return Skeleton([bones[i] for i in sorted(bones)])
+
+
+def _readSkeletalAnimWiiU(b, skeleton):
+    """
+    The first skeletal animation of a Wii U BFRES (Euler rotations only, like the
+    Switch's)
+    """
+    anims = _wiiuDict(b, _rel(b, 0x28))
+    if not anims:
+        return None
+
+    fska = anims[0][1]
+    if b[fska:fska + 4] != b'FSKA':
+        return None
+    flags = struct.unpack_from('>I', b, fska + 0xC)[0]
+    frameCount, numBoneAnims = struct.unpack_from('>HH', b, fska + 0x10)
+    if not flags & 0x1000:
+        return None
+
+    rest = {name: (scale, translation) for name, _, scale, _, translation in skeleton.bones}
+    anim = SkeletalAnim(frameCount, bool(flags & 4))
+    boneAnimArray = _rel(b, fska + 0x20)
+    for i in range(numBoneAnims):
+        entry = boneAnimArray + i * 0x18
+        animFlags = struct.unpack_from('>I', b, entry)[0]
+        name = _wiiuString(b, _rel(b, entry + 4))
+        numCurves = b[entry + 0xA]
+        curveArray, baseData = _rel(b, entry + 0x10), _rel(b, entry + 0x14)
+        if name not in rest:
+            continue
+
+        scale, translation = rest[name]
+        base = list(scale) + list(translation) + [0.0, 0.0, 0.0, 0.0]
+        pos = baseData
+        if pos and animFlags & 0x08:
+            base[0:3] = struct.unpack_from('>3f', b, pos)
+            pos += 12
+        if pos and animFlags & 0x10:
+            base[6:10] = struct.unpack_from('>4f', b, pos)
+            pos += 16
+        if pos and animFlags & 0x20:
+            base[3:6] = struct.unpack_from('>3f', b, pos)
+
+        curves = [AnimCurve(b, curveArray + c * 0x20, True) for c in range(numCurves)] if curveArray else []
+        anim.bones[name] = (base, [(curve.target, curve) for curve in curves])
+
+    return anim
+
+
+def _readMaterialAnimsWiiU(b):
+    """
+    The shader parameter animations (texture SRT, colour, other) of every material in
+    a Wii U BFRES, by material name (the first animation that animates it)
+    """
+    anims = {}
+    for group in (0x34, 0x30, 0x2C):  # texture SRT, colour and shader parameter animations
+        for _, fshu in _wiiuDict(b, _rel(b, group)):
+            if b[fshu:fshu + 4] != b'FSHU':
+                continue
+
+            flags = struct.unpack_from('>I', b, fshu + 0xC)[0]
+            frameCount, numMaterials = struct.unpack_from('>HH', b, fshu + 0x10)
+            materialArray = _rel(b, fshu + 0x2C)
+            for m in range(numMaterials):
+                data = materialArray + m * 0x20
+                numInfos, numCurves, numConsts = struct.unpack_from('>HHH', b, data)
+                name = _wiiuString(b, _rel(b, data + 0x10))
+                infoArray, curveArray, constArray = (_rel(b, data + 0x14 + i * 4) for i in range(3))
+                anim = anims.get(name)
+                if anim is None:
+                    anim = anims[name] = MaterialAnim(frameCount, bool(flags & 4))
+                elif anim.frameCount != frameCount:
+                    continue
+
+                for i in range(numInfos):
+                    info = infoArray + i * 0x10
+                    beginCurve, numFloatCurves, numIntCurves, beginConst, numConstsHere = \
+                        struct.unpack_from('>5H', b, info)
+                    param = _wiiuString(b, _rel(b, info + 0xC))
+                    if param in anim.params:
+                        continue
+
+                    targets = []
+                    for c in range(beginConst, min(beginConst + numConstsHere, numConsts)):
+                        offset, value = struct.unpack_from('>If', b, constArray + c * 8)
+                        targets.append((offset, value))
+                    for c in range(beginCurve, min(beginCurve + numFloatCurves + numIntCurves, numCurves)):
+                        curve = AnimCurve(b, curveArray + c * 0x20, True)
+                        targets.append((curve.target, curve))
+                    anim.params[param] = targets
+
+    return anims
+
+
+def parseBFRESWiiU(b):
+    """
+    Reads the meshes of every model in a Wii U BFRES
+    """
+    if not isWiiUBFRES(b):
+        raise ValueError('Not a Wii U BFRES file')
+
+    anims = _readMaterialAnimsWiiU(b)
+    meshes = []
+    for _, fmdl in _wiiuDict(b, _rel(b, 0x20)):
+        if b[fmdl:fmdl + 4] != b'FMDL':
+            continue
+
+        fvtxArray = _rel(b, fmdl + 0x10)
+        numVertexBuffers = struct.unpack_from('>H', b, fmdl + 0x20)[0]
+
+        materials = {}
+        for _, fmat in _wiiuDict(b, _rel(b, fmdl + 0x18)):
+            index = struct.unpack_from('>H', b, fmat + 0xC)[0]
+            materials[index] = _readMaterialWiiU(b, fmat)
+            materials[index][0].anim = anims.get(materials[index][0].name)
+
+        skeleton = _readSkeletonWiiU(b, _rel(b, fmdl + 0xC))
+        skeleton.anim = _readSkeletalAnimWiiU(b, skeleton)
+
+        vertexCache = {}
+        shapes = []
+        for name, fshp in _wiiuDict(b, _rel(b, fmdl + 0x14)):
+            index, materialIndex, boneIndex, vertexIndex = struct.unpack_from('>4H', b, fshp + 0xC)
+            shapes.append((index, name, fshp, materialIndex, boneIndex, vertexIndex))
+
+        for _, name, fshp, materialIndex, boneIndex, vertexIndex in sorted(shapes):
+            numMesh = b[fshp + 0x17]
+            if not numMesh or vertexIndex >= numVertexBuffers:
+                continue
+
+            if vertexIndex not in vertexCache:
+                vertexCache[vertexIndex] = _readVertexBufferWiiU(b, fvtxArray + vertexIndex * 0x20)
+            attributes = vertexCache[vertexIndex]
+            positions = attributes.get('_p0')
+            if not positions:
+                continue
+
+            material, texture = materials.get(materialIndex, (None, None))
+            mesh = DistantViewMesh(
+                name, [p[:3] for p in positions], attributes.get('_u0'),
+                _readTrianglesWiiU(b, _rel(b, fshp + 0x24)), texture,
+                attributes.get('_n0'), attributes.get('_c0'), material)
+            mesh.skeleton = skeleton
+            mesh.boneIndex = boneIndex if boneIndex < len(skeleton.bones) else 0
+            meshes.append(mesh)
+
+    return meshes
+
+
+# GX2 component selectors (0-3 RGBA, 4 zero, 5 one) as bntxlib's (2-5 RGBA, 0 zero, 1 one)
+_GX2_TO_BNTX_COMP = {0: 2, 1: 3, 2: 4, 3: 5, 4: 0, 5: 1}
+
+
+def loadTexturesWiiU(b, names):
+    """
+    Decodes the named FTEX textures of a Wii U BFRES into QImages (the ones it can)
+    """
+    from bntxlib import bcn, formConv
+    try:
+        from bntxlib import formConv_cy as formConvFast
+    except ImportError:
+        formConvFast = formConv
+    import addrlib
+
+    out = {}
+    for name, ftex in _wiiuDict(b, _rel(b, 0x24)):
+        if name not in names or b[ftex:ftex + 4] != b'FTEX':
+            continue
+
+        try:
+            (dim, width, height, depth, _, fmt, aa, use, imageSize, _, _, _, tileMode, swizzle, _,
+             _) = struct.unpack_from('>16I', b, ftex + 4)
+            compSel = [_GX2_TO_BNTX_COMP.get(c, 0) for c in b[ftex + 0x88:ftex + 0x8C]]
+            start = _rel(b, ftex + 0xB0)
+            if dim != 1 or not start:
+                continue
+
+            base = fmt & 0x3F
+            surface = addrlib.getSurfaceInfo(fmt, width, height, 1, 1, tileMode, 0, 0)
+            data = addrlib.deswizzle(width, height, 1, fmt, aa, use, tileMode, swizzle, surface.pitch,
+                                     surface.bpp, 0, 0, b[start:start + imageSize])
+
+            if base == 0x31:
+                data, kind, bpp = bcn.decompressDXT1(data, width, height), 'rgba8', 4
+            elif base == 0x32:
+                data, kind, bpp = bcn.decompressDXT3(data, width, height), 'rgba8', 4
+            elif base == 0x33:
+                data, kind, bpp = bcn.decompressDXT5(data, width, height), 'rgba8', 4
+            elif base == 0x34:
+                data, kind, bpp = bcn.decompressBC4(data, width, height, 1 if fmt & 0x200 else 0), 'rgba8', 4
+            elif base == 0x35:
+                data, kind, bpp = bcn.decompressBC5(data, width, height, 1 if fmt & 0x200 else 0), 'rgba8', 4
+            elif base == 0x1A:
+                kind, bpp = 'rgba8', 4
+            elif base == 0x01:
+                kind, bpp = 'l8', 1
+            elif base == 0x07:
+                kind, bpp = 'la8', 2
+            elif base == 0x08:
+                kind, bpp = 'rgb565', 2
+            else:
+                continue
+
+            if kind in ('l8', 'la8'):
+                # One or two channels: R (and G), as the component selectors expect
+                data = bytes(data)
+                pixels = width * height
+                red = data[0:pixels * bpp:bpp]
+                green = data[1:pixels * bpp:bpp] if bpp == 2 else bytes(pixels)
+                channels = [bytes(pixels), b'\xFF' * pixels, red, green, bytes(pixels), b'\xFF' * pixels]
+                rgba = bytearray(pixels * 4)
+                for i in range(4):
+                    rgba[i::4] = channels[compSel[i]]
+                data = bytes(rgba)
+            else:
+                data = formConvFast.torgba8(width, height, bytearray(data), kind, bpp, compSel)
+
+            out[name] = QtGui.QImage(bytes(data), width, height, QtGui.QImage.Format_RGBA8888).copy()
+        except Exception:
+            continue
+
+    return out
+
+
 def parseCameraParams(data):
     """
     Reads a dv_*.camera file: a list of (u32 name length, name, u32 value size, value)
@@ -692,7 +1188,54 @@ def _parseAAMP(d):
             lists[struct.unpack_from('<I', d, child)[0]] = readList(child)
         return {'objs': objs, 'lists': lists}
 
+    if struct.unpack_from('<I', d, 4)[0] == 1:
+        return _parseAAMPv1(d)
     return readList(0x30 + struct.unpack_from('<I', d, 0x14)[0])
+
+
+def _parseAAMPv1(d):
+    """
+    A Wii U AAMP parameter archive (little endian, version 1), in _parseAAMP's form.
+    Lists, objects and parameters are stored inline, each starting with its size:
+    list (size, name CRC, list count, object count), object (size, parameter count,
+    name CRC, class CRC), parameter (size, type, name CRC, value).
+    """
+    def value(pos, kind, size):
+        if kind == 0:
+            return bool(d[pos])
+        if kind == 1:
+            return struct.unpack_from('<f', d, pos)[0]
+        if kind == 2:
+            return struct.unpack_from('<i', d, pos)[0]
+        if kind in (3, 4, 5, 6):
+            return struct.unpack_from('<%df' % {3: 2, 4: 3, 5: 4, 6: 4}[kind], d, pos)
+        if kind in (7, 8, 13, 14, 20):
+            end = d.find(b'\0', pos, pos + size)
+            return d[pos:end if end >= 0 else pos + size].decode('utf-8', 'replace')
+        return None
+
+    def readList(pos):
+        _, crc, numLists, numObjs = struct.unpack_from('<4I', d, pos)
+        pos += 16
+        lists = {}
+        for _ in range(numLists):
+            size, childCrc = struct.unpack_from('<II', d, pos)
+            lists[childCrc] = readList(pos)
+            pos += size
+        objs = {}
+        for _ in range(numObjs):
+            size, numParams, objCrc = struct.unpack_from('<III', d, pos)
+            params = {}
+            param = pos + 16
+            for _ in range(numParams):
+                paramSize, kind, paramCrc = struct.unpack_from('<III', d, param)
+                params[paramCrc] = value(param + 12, kind, paramSize - 12)
+                param += paramSize
+            objs[objCrc] = params
+            pos += size
+        return {'objs': objs, 'lists': lists}
+
+    return readList(0x18 + struct.unpack_from('<I', d, 0x14)[0])
 
 
 # Environment packs, by path: {file name: bytes}
@@ -720,11 +1263,15 @@ def loadEnvironmentLightmaps(romfs, name):
     light maps stored in the models; it builds them from the environment's lights:
     each pixel is a surface direction (a sphere map), lit by the lights listed in the
     background's .bagllmap with the colours and directions from its .baglenv.
-    Returns {} if the files aren't found.
+    romfs is the Deluxe romfs (DistantView, Env) or the Wii U content/Common folder
+    (distant_view, env). Returns {} if the files aren't found.
     """
-    envset = os.path.join(romfs, 'DistantView', 'dv_%s.envset' % name)
-    packPath = os.path.join(romfs, 'Env', 'env_pack.szs')
-    if not os.path.isfile(envset) or not os.path.isfile(packPath):
+    for envset, packPath in (
+            (os.path.join(romfs, 'DistantView', 'dv_%s.envset' % name), os.path.join(romfs, 'Env', 'env_pack.szs')),
+            (os.path.join(romfs, 'distant_view', 'dv_%s.envset' % name), os.path.join(romfs, 'env', 'env_pack.szs'))):
+        if os.path.isfile(envset) and os.path.isfile(packPath):
+            break
+    else:
         return {}
 
     with open(envset, encoding='utf-8', errors='replace') as f:
@@ -830,24 +1377,29 @@ def loadDistantView(path):
     if bfres is None:
         raise ValueError('No BFRES found in %s' % path)
 
-    meshes = parseBFRES(bfres)
+    wiiU = isWiiUBFRES(bfres)
+    meshes = parseBFRESWiiU(bfres) if wiiU else parseBFRES(bfres)
 
     # Only decode the textures the meshes use: decoding is slow without the Cython extensions
-    textures = {}
-    bntx = loadBNTXFromBFRES(bfres)
     used = {m.texture for m in meshes if m.texture}
     for m in meshes:
         if m.material is not None:
             used.update(texture for _, texture in m.material.textures if texture)
 
-    for name in used:
-        try:
-            textures[name] = loadTexFromBNTX(bntx, name)
-        except Exception:
-            pass
+    textures = {}
+    if wiiU:
+        textures = loadTexturesWiiU(bfres, used)
+    else:
+        bntx = loadBNTXFromBFRES(bfres)
+        for name in used:
+            try:
+                textures[name] = loadTexFromBNTX(bntx, name)
+            except Exception:
+                pass
 
     # Replace the models' placeholder light maps with the ones the game would generate
-    # (the background's files live in <romfs>/Model, its lighting in <romfs>/Env)
+    # (Deluxe: the background's files live in <romfs>/Model, its lighting in <romfs>/Env;
+    # Wii U: content/Common/distant_view and content/Common/env)
     base = os.path.basename(path)
     if base.startswith('dv_'):
         romfs = os.path.dirname(os.path.dirname(os.path.abspath(path)))
@@ -988,6 +1540,38 @@ def _repeatWidth(meshes, mainZ):
     return min(w for w in widths if w >= widest / 2) or None
 
 
+def _posed(meshes):
+    """
+    The meshes with their vertices placed by their bones (the skeleton's pose at frame
+    0, as the OpenGL renderer starts), for the renderers here that draw positions
+    directly. Each mesh's posed copy is made once.
+    """
+    out = []
+    poses = {}
+    for mesh in meshes:
+        posed = getattr(mesh, '_posed', None)
+        if posed is None:
+            matrix = None
+            skeleton = mesh.skeleton
+            if skeleton is not None:
+                if id(skeleton) not in poses:
+                    poses[id(skeleton)] = skeleton.matrices(0.0)
+                bones = poses[id(skeleton)]
+                matrix = bones[mesh.boneIndex] if mesh.boneIndex < len(bones) else None
+
+            if matrix is None or matrix.isIdentity():
+                posed = mesh
+            else:
+                posed = copy.copy(mesh)
+                QVector3D = QtGui.QVector3D
+                points = (matrix.map(QVector3D(*p)) for p in mesh.positions)
+                posed.positions = [(p.x(), p.y(), p.z()) for p in points]
+                posed._posed = posed
+            mesh._posed = posed
+        out.append(posed)
+    return out
+
+
 def _sortedTriangles(meshes):
     """
     Every triangle as (depth key, mesh index, a, b, c), farthest first
@@ -1019,9 +1603,71 @@ def _makeFills(meshes, textures):
     return fills
 
 
+class ViewOptions:
+    """
+    How the editor lines a zone's background up with the level (Preferences >
+    Background Preview)
+    """
+
+    def __init__(self, gameCamera=True, fillView=False, offsetX=0.0, offsetY=0.0):
+        self.gameCamera = gameCamera  # keep the screen inside the zone, like the game's camera
+        self.fillView = fillView      # one game screen fills the editor's view (Miyamoto-Next)
+        self.offsetX = offsetX        # extra shift of the picture in level units, to the right
+        self.offsetY = offsetY        # extra shift of the picture in level units, down
+
+    def key(self):
+        return (self.gameCamera, self.fillView, self.offsetX, self.offsetY)
+
+
+def viewOptionsFromSettings(setting):
+    """
+    The ViewOptions saved in the settings; setting is misc.setting
+    """
+    def flag(name, default):
+        value = setting(name, default)
+        if isinstance(value, str):
+            return value.strip().lower() in ('true', '1', 'yes')
+        return bool(value)
+
+    def number(name):
+        try:
+            return float(setting(name, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return ViewOptions(flag('BgPreviewGameCamera', True), flag('BgPreviewFillView', False),
+                       number('BgPreviewOffsetX'), number('BgPreviewOffsetY'))
+
+
+def _clampCenter(center, half, low, high):
+    """
+    A centre moved so [center - half, center + half] stays within [low, high] (the
+    middle if it doesn't fit)
+    """
+    if high - low <= 2 * half:
+        return (low + high) / 2
+    return min(max(center, low + half), high - half)
+
+
+class _Frame:
+    """
+    One placement of the game's background camera, and where its picture lands in the
+    editor: a point the game draws s level units (at the zone's plane) from the
+    screen's centre is shown at anchor + scale * s, in zone coordinates (relative to
+    the zone's top left, Y going up)
+    """
+
+    def __init__(self, camX, camY, offsetX, offsetY, anchorX, anchorY, scale=1.0):
+        self.camX, self.camY = camX, camY              # the camera (it's at _ZoneCamera.cameraZ)
+        self.offsetX, self.offsetY = offsetX, offsetY  # projection offset, fractions of the screen
+        self.anchorX, self.anchorY = anchorX, anchorY
+        self.scale = scale
+
+
 class _ZoneCamera:
     """
-    The game's background camera for one zone. Coordinates are relative to the zone's
+    The game's background camera for one zone, as the game's DistantViewMgr::calcView_
+    places it (identical on Wii U and Deluxe). Coordinates are relative to the zone's
     top left, in level units, with Y going up.
     """
 
@@ -1041,6 +1687,19 @@ class _ZoneCamera:
         self.modelY = -zoneHeight + self.screenH / 2 + camera.get('mModelOffsetY', 0.0)
         self.modelZ = camera.get('mModelOffsetZ', 0.0)
 
+    def screenCenter(self, x, y, gameCamera=True):
+        """
+        Where the game's screen centre would be for a wanted centre (x, y). The game's
+        camera keeps the whole screen inside the zone, so near the zone's edges (most
+        of all its bottom, where levels mostly play) it stops short of the editor's
+        view centre; without gameCamera, only the centre is kept inside the zone (like
+        Miyamoto-Next does).
+        """
+        if gameCamera:
+            return (_clampCenter(x, self.screenW / 2, 0.0, self.zoneWidth),
+                    _clampCenter(y, self.screenH / 2, -self.zoneHeight, 0.0))
+        return min(max(x, 0.0), self.zoneWidth), min(max(y, -self.zoneHeight), 0.0)
+
     def cameraFor(self, screenX, screenY):
         """
         The game's camera with the screen centred at (screenX, screenY): returns
@@ -1048,6 +1707,7 @@ class _ZoneCamera:
         at self.cameraZ, looking down -Z; the offsets shift the view by that fraction
         of its size.
         """
+        # How far the screen's bottom is above the zone's bottom
         aboveBottom = min(max(screenY - self.screenH / 2 + self.zoneHeight, 0.0), self.zoneHeight)
 
         camX = screenX - self.screenH * self.projOffsetX
@@ -1061,24 +1721,43 @@ class _ZoneCamera:
 
         return camX, camY, self.projOffsetX, offsetY
 
-    def project(self, meshes, screenX, screenY, pixelX, pixelY, scale, camX=None, copies=((0.0,)),
-                aspect=None):
+    def frameFor(self, viewX, viewY, viewH=None, options=None, camX=None):
         """
-        Screen positions of the model's vertices with the screen centred at (screenX,
-        screenY); camX overrides the game's camera X. Each entry of copies is an X shift
-        of a copy of the model. Returns one list of per-mesh points per copy, mapped so
-        the screen's middle is at pixel (pixelX, pixelY), scale pixels per level unit.
+        The camera for an editor view centred at (viewX, viewY), viewH tall (zone
+        coordinates). The screen goes where the game's camera would be, and its
+        picture is drawn at the level's scale, so the background lines up with the
+        level as in the game; or, with options.fillView, one game screen fills the
+        view's height (around the view's centre). camX overrides the camera's X.
         """
+        options = options or ViewOptions()
+        screenX, screenY = self.screenCenter(viewX, viewY, options.gameCamera)
         gameCamX, camY, offsetX, offsetY = self.cameraFor(screenX, screenY)
-        if camX is None:
-            camX = gameCamX
+
+        if options.fillView and viewH:
+            anchorX, anchorY, scale = viewX, viewY, viewH / self.screenH
+        else:
+            anchorX, anchorY, scale = screenX, screenY, 1.0
+
+        return _Frame(gameCamX if camX is None else camX, camY, offsetX, offsetY,
+                      anchorX + options.offsetX, anchorY - options.offsetY, scale)
+
+    def project(self, meshes, frame, mapping, copies=(0.0,)):
+        """
+        Pixel positions of the model's vertices seen through a frame. mapping is
+        (x0, y0, sx, sy): zone point (x, y) is pixel (x0 + x * sx, y0 - y * sy). Each
+        entry of copies is an X shift of a copy of the model. Returns one list of
+        per-mesh points per copy.
+        """
+        x0, y0, sx, sy = mapping
 
         # Perspective projection with the frustum shifted by the projection offset (a
-        # fraction of the view's size); the zone's plane (z = 0) maps 1:1
-        viewW = self.screenH * aspect if aspect else self.screenW
-        shiftX = offsetX * viewW
-        shiftY = offsetY * self.screenH
+        # fraction of the game screen's size); the zone's plane (z = 0) maps 1:1
+        shiftX = frame.offsetX * self.screenW
+        shiftY = frame.offsetY * self.screenH
         cameraZ, modelZ, modelY = self.cameraZ, self.modelZ, self.modelY
+        k = frame.scale
+        baseX, baseY = x0 + frame.anchorX * sx, y0 - frame.anchorY * sy
+        camX, camY = frame.camX, frame.camY
 
         projected = []
         for copyShift in copies:
@@ -1092,23 +1771,39 @@ class _ZoneCamera:
                         points.append(None)
                     else:
                         f = cameraZ / depth
-                        sx = (x + copyX - camX) * f - shiftX
-                        sy = (y + modelY - camY) * f - shiftY
-                        points.append((pixelX + sx * scale, pixelY - sy * scale))
+                        s = ((x + copyX - camX) * f - shiftX) * k
+                        t = ((y + modelY - camY) * f - shiftY) * k
+                        points.append((baseX + s * sx, baseY - t * sy))
                 meshPoints.append(points)
             projected.append(meshPoints)
 
         return projected
 
+    def frustum(self, frame, left, right, bottom, top, near):
+        """
+        The near plane rectangle (left, right, bottom, top) of the perspective frustum
+        that shows the zone area [left, right] x [bottom, top] (zone coordinates)
+        through a frame
+        """
+        shiftX = frame.offsetX * self.screenW
+        shiftY = frame.offsetY * self.screenH
+        f = near / self.cameraZ / frame.scale
+        return ((left - frame.anchorX) * f + shiftX * near / self.cameraZ,
+                (right - frame.anchorX) * f + shiftX * near / self.cameraZ,
+                (bottom - frame.anchorY) * f + shiftY * near / self.cameraZ,
+                (top - frame.anchorY) * f + shiftY * near / self.cameraZ)
+
 
 def renderZoneBackground(meshes, textures, zoneWidth, zoneHeight, camera=None, camMode=0, camZoom=0,
-                         maxSize=4096, progress=None):
+                         maxSize=4096, progress=None, options=None):
     """
     Renders a background model to fill a zone of the given size (in level units). The
     zone is split into screen-sized pieces, each seen through the game's camera, with
     the camera moved so the main layer of scenery joins up between pieces.
     Returns a QImage.
     """
+    options = options or ViewOptions()
+    meshes = _posed(meshes)
     view = _ZoneCamera(camera or {}, zoneWidth, zoneHeight, camMode, camZoom)
     scale = min(2.0, maxSize / max(zoneWidth, 1), maxSize / max(zoneHeight, 1))
     width, height = max(1, round(zoneWidth * scale)), max(1, round(zoneHeight * scale))
@@ -1142,22 +1837,29 @@ def renderZoneBackground(meshes, textures, zoneWidth, zoneHeight, camera=None, c
     painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
 
     transform = QtGui.QTransform()
+    mapping = (0.0, 0.0, scale, scale)
     for row in range(rows):
         for col in range(cols):
             x0, x1 = width * col // cols, width * (col + 1) // cols
             y0, y1 = height * row // rows, height * (row + 1) // rows
-            pixelX, pixelY = (x0 + x1) / 2, (y0 + y1) / 2
-            screenX, screenY = pixelX / scale, -pixelY / scale
+            pieceX, pieceY = (x0 + x1) / 2 / scale, -(y0 + y1) / 2 / scale
+
+            # Vertically each piece shows what the game shows with the screen there (the
+            # game's camera never goes below the zone's bottom); horizontally the camera
+            # moves faster, see above
+            screenX = view.screenCenter(pieceX, pieceY, options.gameCamera)[0]
             camX = screenX + (screenX - zoneWidth / 2) * (step - 1) - view.screenH * view.projOffsetX
+            frame = view.frameFor(pieceX, pieceY, None, options, camX)
 
             # The copies of the model this piece can see (at the farthest depth the view
             # is widest)
-            reach = ((x1 - x0) / scale / 2 + abs(view.projOffsetX * view.screenW)) * farthest / cameraZ
+            reach = ((x1 - x0) / scale / 2 + abs(frame.anchorX - pieceX)
+                     + abs(view.projOffsetX * view.screenW)) * farthest / cameraZ
             first = math.ceil((camX - reach - view.modelX - modelRight) / period)
             last = math.floor((camX + reach - view.modelX - modelLeft) / period)
             copies = [copy * period for copy in range(first, last + 1)]
 
-            projected = view.project(meshes, screenX, screenY, pixelX, pixelY, scale, camX, copies)
+            projected = view.project(meshes, frame, mapping, copies)
             painter.setClipRect(x0, y0, x1 - x0, y1 - y0)
             _drawTriangles(painter, triangles, meshes, projected, fills, transform, (x0, y0, x1, y1))
 
@@ -1168,16 +1870,27 @@ def renderZoneBackground(meshes, textures, zoneWidth, zoneHeight, camera=None, c
     return image
 
 
-def renderLiveView(meshes, textures, camera, zoneRect, camMode, camZoom, viewRect, width, height):
+def liveFrame(view, zoneRect, viewRect, options=None):
     """
-    What the game shows of a zone's background with the screen centred on the editor's
-    view, like Miyamoto-Next does: the camera follows the view's middle (kept inside the
-    zone), and the picture fills the view whatever the editor's zoom.
-    zoneRect and viewRect are (x, y, width, height) in level units, Y going down.
-    Returns a width x height QImage of the whole view, transparent outside the zone.
+    The camera frame showing a zone's background in an editor view, both rects
+    (x, y, width, height) in level units with Y going down
     """
     zoneX, zoneY, zoneW, zoneH = zoneRect
     viewX, viewY, viewW, viewH = viewRect
+    return view.frameFor(viewX + viewW / 2 - zoneX, -(viewY + viewH / 2 - zoneY), viewH, options)
+
+
+def renderLiveView(meshes, textures, camera, zoneRect, camMode, camZoom, viewRect, width, height, options=None):
+    """
+    What the game shows of a zone's background with the screen centred on the editor's
+    view (or as close as the game's camera gets), at the level's scale or filling the
+    view (see ViewOptions). zoneRect and viewRect are (x, y, width, height) in level
+    units, Y going down. Returns a width x height QImage of the whole view,
+    transparent outside the zone.
+    """
+    zoneX, zoneY, zoneW, zoneH = zoneRect
+    viewX, viewY, viewW, viewH = viewRect
+    meshes = _posed(meshes)
     view = _ZoneCamera(camera or {}, zoneW, zoneH, camMode, camZoom)
 
     image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32_Premultiplied)
@@ -1187,22 +1900,17 @@ def renderLiveView(meshes, textures, camera, zoneRect, camMode, camZoom, viewRec
     if not triangles:
         return image
 
-    # The view's middle, kept inside the zone, in zone coordinates with Y going up
-    screenX = min(max(viewX + viewW / 2, zoneX), zoneX + zoneW) - zoneX
-    screenY = -(min(max(viewY + viewH / 2, zoneY), zoneY + zoneH) - zoneY)
-
-    # The game's screen height fills the image's height
-    scale = height / view.screenH
-
     # Only the part of the view inside the zone gets drawn
-    left = max(0.0, (zoneX - viewX) / viewW * width)
-    right = min(float(width), (zoneX + zoneW - viewX) / viewW * width)
-    top = max(0.0, (zoneY - viewY) / viewH * height)
-    bottom = min(float(height), (zoneY + zoneH - viewY) / viewH * height)
+    sx, sy = width / viewW, height / viewH
+    left = max(0.0, (zoneX - viewX) * sx)
+    right = min(float(width), (zoneX + zoneW - viewX) * sx)
+    top = max(0.0, (zoneY - viewY) * sy)
+    bottom = min(float(height), (zoneY + zoneH - viewY) * sy)
     if right <= left or bottom <= top:
         return image
 
-    projected = view.project(meshes, screenX, screenY, width / 2, height / 2, scale, aspect=width / height)
+    frame = liveFrame(view, zoneRect, viewRect, options)
+    projected = view.project(meshes, frame, ((zoneX - viewX) * sx, (zoneY - viewY) * sy, sx, sy))
 
     painter = QtGui.QPainter(image)
     painter.setPen(Qt.NoPen)
@@ -1298,14 +2006,14 @@ def isDistantViewLoaded(path):
     return (path, os.path.getmtime(path)) in _loaded
 
 
-def renderDistantViewFile(path, zoneWidth, zoneHeight, camMode=0, camZoom=0, progress=None):
+def renderDistantViewFile(path, zoneWidth, zoneHeight, camMode=0, camZoom=0, progress=None, options=None):
     """
     Loads a dv_*.szs and renders it for a zone of the given size (in level units) and
     camera settings
     """
     meshes, textures, camera = getDistantView(path)
     return renderZoneBackground(meshes, textures, zoneWidth, zoneHeight, camera, camMode, camZoom,
-                                progress=progress)
+                                progress=progress, options=options)
 
 
 class LiveViewRenderThread(QtCore.QThread):
@@ -1316,12 +2024,13 @@ class LiveViewRenderThread(QtCore.QThread):
     rendered = QtCore.pyqtSignal(object)    # [QImage], one per zone, each the whole view
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, jobs, viewRect, width, height, parent=None):
+    def __init__(self, jobs, viewRect, width, height, parent=None, options=None):
         """
         jobs: [(dv path, zone rect, camera mode, camera zoom)], rects in level units
         """
         super().__init__(parent)
         self.jobs = jobs
+        self.options = options
         self.viewRect = viewRect
         self.width = width
         self.height = height
@@ -1335,7 +2044,7 @@ class LiveViewRenderThread(QtCore.QThread):
 
                 meshes, textures, camera = getDistantView(path)
                 images.append(renderLiveView(meshes, textures, camera, zoneRect, camMode, camZoom,
-                                             self.viewRect, self.width, self.height))
+                                             self.viewRect, self.width, self.height, self.options))
         except Exception as e:
             self.failed.emit(str(e) or type(e).__name__)
             return
@@ -1351,9 +2060,10 @@ class DistantViewRenderThread(QtCore.QThread):
     rendered = QtCore.pyqtSignal(object, object)    # zone, QImage
     failed = QtCore.pyqtSignal(object, str)         # zone, error message
 
-    def __init__(self, zone, path, parent=None):
+    def __init__(self, zone, path, parent=None, options=None):
         super().__init__(parent)
         self.zone = zone
+        self.options = options
         self.path = path
         self.zoneWidth = zone.width
         self.zoneHeight = zone.height
@@ -1365,6 +2075,7 @@ class DistantViewRenderThread(QtCore.QThread):
             image = renderDistantViewFile(
                 self.path, self.zoneWidth, self.zoneHeight, self.camMode, self.camZoom,
                 progress=lambda done: self.progress.emit(self.zone, int(done * 100)),
+                options=self.options,
             )
         except Exception as e:
             self.failed.emit(self.zone, str(e) or type(e).__name__)
