@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
-UPDATER_VERSION = '2.0.0'
+UPDATER_VERSION = '2.1.0'
 GITHUB_REPO = 'Steammaker212/Yaz0moto'
 RELEASES_URL = f'https://github.com/{GITHUB_REPO}/releases'
 _API_BASE = f'https://api.github.com/repos/{GITHUB_REPO}/releases'
@@ -581,37 +581,51 @@ def install_directory(target, staged, log):
         stale_top = {path.split('/', 1)[0] for path in old_manifest} - new_top - {UPDATER_DIR, MANIFEST}
 
     updater_in_use = _running_from(target / UPDATER_DIR)
-    done = []  # (name, had an old version in the backup)
+    entries = [entry for entry in sorted(staged.iterdir(), key=lambda p: p.name)
+               if not (entry.name == UPDATER_DIR and updater_in_use)]  # the running updater: below
+    moved = []   # old top-level files and folders now in the backup
+    placed = []  # new ones now in place
 
-    def restore():
-        for name, had_old in reversed(done):
-            try:
-                if (target / name).exists() or (target / name).is_symlink():
+    def put_back():
+        # A new file goes only where the old one is there to take its place again: a
+        # failed step never leaves a file missing
+        for name in reversed(placed):
+            if name in moved and (backup / name).exists():
+                try:
                     _remove(target / name)
-                if had_old:
+                except OSError as exc:
+                    log(f'Could not remove the new {name}: {exc}')
+        for name in reversed(moved):
+            try:
+                if not (target / name).exists() and not (target / name).is_symlink():
                     _retry(lambda: (backup / name).rename(target / name))
             except OSError as exc:
-                log(f'Could not put {name} back: {exc}')
+                log(f'Could not put {name} back (it is in {backup}): {exc}')
 
     try:
-        for name in sorted(stale_top):
-            if (target / name).exists():
-                log(f'Removing {name} (not in the new version)')
-                _retry(lambda: (target / name).rename(backup / name))
-                done.append((name, True))
-
-        for entry in sorted(staged.iterdir(), key=lambda p: p.name):
-            name = entry.name
-            if name == UPDATER_DIR and updater_in_use:
-                continue  # handled below
+        # 1. Every old file and folder the update replaces goes aside first. If one is in use
+        # (Yaz0moto still open, say) nothing new is in yet, and they all go back.
+        for name in sorted(stale_top) + [entry.name for entry in entries]:
             dest = target / name
-            had_old = dest.exists() or dest.is_symlink()
-            if had_old:
+            if name in moved or not (dest.exists() or dest.is_symlink()):
+                continue
+            if name in stale_top:
+                log(f'Removing {name} (not in the new version)')
+            try:
                 _retry(lambda: dest.rename(backup / name))
-            done.append((name, had_old))
-            _retry(lambda: entry.rename(dest))
+            except OSError as exc:
+                raise UpdateError(f'{name} is in use, so nothing was changed. Close every Yaz0moto window '
+                                  f'(and any program using its files) and try again. ({exc})') from exc
+            moved.append(name)
 
-            if name in MERGE_DIRS and had_old and dest.is_dir() and (backup / name).is_dir():
+        # 2. The new ones go in
+        for entry in entries:
+            name = entry.name
+            dest = target / name
+            _retry(lambda: entry.rename(dest))
+            placed.append(name)
+
+            if name in MERGE_DIRS and name in moved and dest.is_dir() and (backup / name).is_dir():
                 # Keep what the user added: files the old package didn't ship
                 for rel in _relative_files(backup / name):
                     full = name + '/' + rel
@@ -637,7 +651,7 @@ def install_directory(target, staged, log):
             log(f'Could not write the file list: {exc}')
     except Exception:
         log('Installing failed, putting the old files back:\n' + traceback.format_exc())
-        restore()
+        put_back()
         raise
 
     try:

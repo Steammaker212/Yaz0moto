@@ -178,6 +178,54 @@ check('a failed install raises and restores the old version exactly',
       failed and read(install, EXE) == b'old exe' and read(install, 'lib/old.pyd') == b'old'
       and read(install, 'lib/new.pyd') is None and read(install, 'yaz0data/a.txt') == b'old')
 
+# An old folder in use (another Yaz0moto window open): nothing changes, and it says why
+install = make_install({EXE: b'old exe', 'project.json': b'{}', 'README.md': b'old', 'yaz0data/a.txt': b'old'})
+staged = tmp / 'staged5'
+for rel, data in {EXE: b'new exe', 'project.json': b'{"new": 1}', 'README.md': b'new', 'yaz0data/a.txt': b'new'}.items():
+    (staged / rel).parent.mkdir(parents=True, exist_ok=True)
+    (staged / rel).write_bytes(data)
+
+
+def in_use_rename(self, target):
+    if self.name == 'yaz0data' and str(self).startswith(str(install)):
+        raise PermissionError('simulated: access is denied')
+    return real_rename(self, target)
+
+
+with mock.patch.object(Path, 'rename', in_use_rename), mock.patch.object(core.time, 'sleep', lambda s: None):
+    try:
+        core.install(core.KIND_DIRECTORY, install, staged, log)
+        error = None
+    except core.UpdateError as exc:
+        error = str(exc)
+check('an old file in use stops the update before anything new goes in (%s)' % (error or '')[:50],
+      error and 'Close every Yaz0moto window' in error and read(install, EXE) == b'old exe'
+      and read(install, 'project.json') == b'{}' and read(install, 'README.md') == b'old'
+      and read(install, 'yaz0data/a.txt') == b'old')
+
+# If the backup is lost halfway (another Yaz0moto cleaned it up), no file goes missing
+install = make_install({EXE: b'old exe', 'project.json': b'{}', 'yaz0data/a.txt': b'old'})
+staged = tmp / 'staged6'
+for rel, data in {EXE: b'new exe', 'project.json': b'{"new": 1}', 'yaz0data/a.txt': b'new'}.items():
+    (staged / rel).parent.mkdir(parents=True, exist_ok=True)
+    (staged / rel).write_bytes(data)
+
+
+def lose_backup_rename(self, target):
+    if self.name == 'yaz0data' and str(self).startswith(str(staged)):
+        core._remove(install / core.BACKUP_DIR)
+        raise OSError('simulated: failed after the backup was removed')
+    return real_rename(self, target)
+
+
+with mock.patch.object(Path, 'rename', lose_backup_rename), mock.patch.object(core.time, 'sleep', lambda s: None):
+    try:
+        core.install(core.KIND_DIRECTORY, install, staged, log)
+    except OSError:
+        pass
+check('...and the new files stay where the old ones can\'t come back',
+      read(install, EXE) == b'new exe' and read(install, 'project.json') == b'{"new": 1}')
+
 # The updater running from <install>/updater can't replace itself: it leaves updater.new
 install = make_install({EXE: b'old', 'updater/' + UPD: b'running updater'})
 staged = tmp / 'staged4'
@@ -195,6 +243,18 @@ check('the running updater is left alone and the new one waits in updater.new',
 from PyQt5 import QtWidgets  # noqa: E402
 app = QtWidgets.QApplication([])
 from yaz0moto import updater  # noqa: E402
+
+fresh = tmp / 'fresh-install'
+(fresh / core.BACKUP_DIR).mkdir(parents=True)
+(fresh / core.BACKUP_DIR / 'project.json').write_bytes(b'{}')
+updater.install_staged_updater(fresh)
+check('at startup a backup an update may still be using is left alone',
+      (fresh / core.BACKUP_DIR / 'project.json').exists())
+old_time = core.time.time() - 3600
+for f in [fresh / core.BACKUP_DIR, fresh / core.BACKUP_DIR / 'project.json']:
+    os.utime(f, (old_time, old_time))
+updater.install_staged_updater(fresh)
+check('...and an old leftover is removed', not (fresh / core.BACKUP_DIR).exists())
 
 check('Yaz0moto swaps updater.new in at its next start', updater.install_staged_updater(install)
       and read(install, 'updater/' + UPD) == b'next updater' and not (install / core.UPDATER_STAGED_DIR).exists()

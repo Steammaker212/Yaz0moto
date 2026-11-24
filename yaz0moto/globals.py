@@ -33,7 +33,9 @@ def _load_project_info():
                 with open(_proj, 'r', encoding='utf-8') as _f:
                     return json.load(_f)
         tried = '\n'.join(f'  {os.path.join(b, "project.json")}' for b in candidates)
-        raise FileNotFoundError(f'project.json not found in frozen app. Tried:\n{tried}')
+        # Lost (an update that didn't finish, say): start anyway, so the updater can put it back
+        print(f'project.json not found in frozen app. Tried:\n{tried}', file=sys.stderr)
+        return {'id': 'Yaz0moto level editor', 'version': 'unknown', 'release_type': 'nightly', 'missing': True}
     else:
         # Development: project root is two levels up from yaz0moto/globals.py
         base = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -45,6 +47,7 @@ MiyamotoID = _project['id']
 MiyamotoVersion = _project['version']
 MiyamotoReleaseType = _project.get('release_type', 'release')
 MiyamotoBuildDate = _project.get('build_date')  # UTC, set by the build workflow
+ProjectInfoMissing = bool(_project.get('missing'))  # project.json is gone from this installation
 
 app = None
 mainWindow = None

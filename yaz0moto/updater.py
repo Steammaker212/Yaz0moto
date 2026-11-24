@@ -393,6 +393,11 @@ _installing_release = None
 def check_for_updates():
     finish_previous_update()
     channel = _current_channel()
+    if globals.ProjectInfoMissing:
+        _show_error("Some of Yaz0moto's files are missing from its folder (an update that didn't finish can "
+                    "cause this). " + ("Install the update Yaz0moto offers next to put them back, or download "
+                                       "Yaz0moto again." if channel != CHANNEL_OFF else
+                                       "Download Yaz0moto again, or turn updates on in Preferences to repair it."))
     if channel != CHANNEL_OFF:
         _start_check(channel, manual=False)
 
@@ -595,6 +600,16 @@ def finish_previous_update():
     QtCore.QTimer.singleShot(5000, lambda: install_staged_updater(location.target))
 
 
+def _older_than(path, seconds):
+    """Whether path (and everything in it) was last changed more than seconds ago."""
+    import time
+    try:
+        newest = max([path.stat().st_mtime] + [p.stat().st_mtime for p in path.rglob('*')])
+    except OSError:
+        return False
+    return time.time() - newest > seconds
+
+
 def install_staged_updater(target):
     """Replaces the updater folder with updater.new (left by the last update), if there is one."""
     target = Path(target)
@@ -603,7 +618,9 @@ def install_staged_updater(target):
     old = target / (core.UPDATER_DIR + '.old')
 
     for leftover in (old, target / core.BACKUP_DIR, target / core.WORK_DIR):
-        if leftover.exists() and _worker is None:
+        # An update another Yaz0moto window started may still be using these (its backup
+        # holds the old files until it's done): only old leftovers go
+        if leftover.exists() and _worker is None and _older_than(leftover, 15 * 60):
             shutil.rmtree(leftover, ignore_errors=True)
     if not staged.is_dir():
         return False
